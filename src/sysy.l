@@ -28,6 +28,14 @@ Decimal       [1-9][0-9]*
 Octal         0[0-7]*
 Hexadecimal   0[xX][0-9a-fA-F]+
 
+/**/
+Or            "||"
+And           "&&"
+Equal         "=="
+NEqual        "!="
+LEqual        "<="
+GEqual        ">="
+
 %%
 
 {WhiteSpace}    { /* 忽略, 不做任何操作 */ }
@@ -45,4 +53,10 @@ Hexadecimal   0[xX][0-9a-fA-F]+
 
 .               { return yytext[0]; }
 
+{Or}            { yylval.str_val = new string("||"); return OR; }
+{And}           { yylval.str_val = new string("&&"); return AND; }
+{Equal}         { yylval.str_val = new string("=="); return EQ; }
+{NEqual}        { yylval.str_val = new string("!="); return NE; }
+{LEqual}        { yylval.str_val = new string("<="); return LE; }
+{GEqual}        { yylval.str_val = new string(">="); return GE; }
 %%
