@@ -258,12 +258,32 @@ Stmt
   : RETURN Exp ';' {
     auto ast = new StmtAST();
     ast->exp = unique_ptr<SubBaseAST>($2);
+    ast->flag = 1;
+    $$ = ast;
+  }
+  | RETURN ';' {
+    auto ast = new StmtAST();
+    $$ = ast;
+  }
+  | Exp ';' {
+    auto ast = new StmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($1);
+    ast->flag = 0;
+    $$ = ast;
+  }
+  | ';'{
+    auto ast = new StmtAST();
     $$ = ast;
   }
   | LVal '=' Exp ';' {
     auto ast = new StmtAST();
     ast->lval = unique_ptr<LValAST>($1);
     ast->exp = unique_ptr<SubBaseAST>($3);
+    $$ = ast;
+  }
+  | Block { 
+    auto ast = new StmtAST();
+    ast->block = unique_ptr<BaseAST>($1);
     $$ = ast;
   }
   ;

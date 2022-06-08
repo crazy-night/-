@@ -7,18 +7,33 @@ int reg = 0;
 string Type[1] = { "i32" };
 string b_type[1] = { "int" };
 
-vector<Symbol>* cur;
+SymbolTable* cur_tab;
+
+//区别不同符号表重名符号
+int tab_num;
+int func_num;
 
 string CompUnitAST::Dump() const {
 	code += "fun ";
+	SymbolTable global_symbol_table;
+	tab_num = 0;
+	func_num = 0;
+	cur_tab = &global_symbol_table;
 	func_def->Dump();
 	return code;
 }
 
 string FuncDefAST::Dump() const {
 	code += "@" + ident + "(): ";
+	SymbolTable func_symbol_table;
+	tab_num++;
+	func_symbol_table.pre = cur_tab;
+	cur_tab = &func_symbol_table;
 	code += func_type->Dump();
+	code += " {\n%entry:\n";
 	block->Dump();
+	code += "}\n";
+	cur_tab = cur_tab->pre;
 	return "FuncDefAST";
 }
 
@@ -28,12 +43,13 @@ string FuncTypeAST::Dump() const {
 }
 
 string BlockAST::Dump()const {
-	code += " {\n%entry:\n";
-	vector<Symbol> v;
-	cur = &v;
+	SymbolTable block_symbol_table;
+	tab_num++;
+	block_symbol_table.pre = cur_tab;
+	cur_tab = &block_symbol_table;
 	for (auto it = blockitem->begin();it != blockitem->end();++it)
 		(*it)->Dump();
-	code += "}\n";
+	cur_tab = cur_tab->pre;
 	return "BlockAST";
 }
 
@@ -71,7 +87,8 @@ string ConstDefAST::Dump()const {
 	s.name = ident;
 	s.value = constinitval->Cal();
 	s.type = 0;
-	cur->push_back(s);
+	s.depth = tab_num;
+	cur_tab->table.push_back(s);
 	return "ConstDef";
 }
 
@@ -106,13 +123,14 @@ string VarDefAST::Dump()const {
 	Symbol s;
 	s.name = ident;
 	s.type = 1;
-	cur->push_back(s);
-	code += "  @" + ident + " = alloc " + Type[0] + "\n";
+	s.depth = tab_num;
+	cur_tab->table.push_back(s);
+	code += "  @" + s.dump() + " = alloc " + Type[0] + "\n";
 	if (initval != NULL) {
 		string ans = initval->Dump();
-		code += "  store " + ans + ", @" + ident + "\n";
+		code += "  store " + ans + ", @" + s.dump() + "\n";
 	}
-	return "  @" + ident;
+	return "  @" + s.dump();
 }
 
 string InitValAST::Dump()const {
@@ -125,12 +143,18 @@ int InitValAST::Cal()const {
 
 
 string StmtAST::Dump()const {
-	string value = exp->Dump();
-	if (lval != NULL) {
-		code += "  store " + value + ", @" + lval->Assign() + "\n";
+	if (exp != NULL) {
+		string value = exp->Dump();
+		if (lval != NULL) {
+			code += "  store " + value + ", @" + lval->Assign() + "\n";
+		}
+		else if (flag) {
+			code += "  ret " + value + "\n";
+		}
 	}
-	else
-		code += "  ret " + value + "\n";
+	else if (block != NULL) {
+		block->Dump();
+	}
 	return "StmtAST";
 }
 
@@ -343,7 +367,7 @@ int PrimaryExpAST::Cal()const {
 string LValAST::Dump()const {
 	auto it = find(ident);
 	if (it.type) {
-		code += "  %" + to_string(reg) + " = load @" + it.name + "\n";
+		code += "  %" + to_string(reg) + " = load @" + it.dump() + "\n";
 		return "%" + to_string(reg++);
 	}
 	return to_string(it.value);
@@ -356,7 +380,7 @@ int LValAST::Cal()const {
 string LValAST::Assign()const {
 	auto it = find(ident);
 	if (it.type) {
-		return it.name;
+		return it.dump();
 	}
 	assert(false);
 }
@@ -379,16 +403,24 @@ int UnaryOpAST::Cal()const {
 	return op_id;
 }
 
+string Symbol::dump() {
+	return name + "_" + to_string(depth);
+}
+
 Symbol find(string name) {
-	for (auto it = cur->begin();it != cur->end();++it) {
-		if (it->name == name)
-			return *it;
+	auto p = cur_tab;
+	while (p) {
+		for (auto it = p->table.begin();it != p->table.end();++it) {
+			if (it->name == name)
+				return *it;
+		}
+		p = p->pre;
 	}
 	assert(false);
 }
 
 bool exist(string name) {
-	for (auto it = cur->begin();it != cur->end();++it) {
+	for (auto it = cur_tab->table.begin();it != cur_tab->table.end();++it) {
 		if (it->name == name)
 			return true;
 	}

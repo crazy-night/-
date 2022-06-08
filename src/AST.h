@@ -9,12 +9,19 @@
 #include<vector>
 
 
-typedef struct
+struct Symbol
 {
 	std::string name;
 	int type;
 	int value;
-} Symbol;
+	int depth;
+	std::string dump();
+};
+
+struct SymbolTable {
+	SymbolTable* pre;
+	std::vector<Symbol> table;
+};
 
 Symbol find(std::string);
 bool exist(std::string);
@@ -145,6 +152,8 @@ class StmtAST :public BaseAST {
 public:
 	std::unique_ptr<SubBaseAST> exp;
 	std::unique_ptr<LValAST> lval;
+	std::unique_ptr<BaseAST> block;
+	int flag;
 	std::string Dump() const override;
 };
 
