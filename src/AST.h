@@ -6,12 +6,30 @@
 #include<string>
 #include<cstdio>
 #include<cassert>
+#include<vector>
+
+
+typedef struct
+{
+	std::string name;
+	int type;
+	int value;
+} Symbol;
+
+Symbol find(std::string);
+bool exist(std::string);
 
 
 class BaseAST {
 public:
 	virtual ~BaseAST() = default;
 	virtual std::string Dump() const = 0;
+};
+
+class SubBaseAST :public BaseAST {
+public:
+	virtual ~SubBaseAST() = default;
+	virtual int Cal()const = 0;
 };
 
 // CompUnit ÊÇ BaseAST
@@ -35,93 +53,185 @@ public:
 class FuncTypeAST :public BaseAST {
 public:
 	int func_typeid;
-	std::string type[1] = { "i32" };
 	std::string Dump()const override;
 };
 
-class BlockAST :public BaseAST {
+class BlockItemAST :public BaseAST {
 public:
+	std::unique_ptr<BaseAST> decl;
 	std::unique_ptr<BaseAST> stmt;
 	std::string Dump() const override;
 };
 
+class BlockAST :public BaseAST {
+public:
+	std::unique_ptr<std::vector<std::unique_ptr<BlockItemAST>>> blockitem;
+	std::string Dump() const override;
+};
+
+class DeclAST :public BaseAST {
+public:
+	std::unique_ptr<BaseAST> constdecl;
+	std::unique_ptr<BaseAST> vardecl;
+	std::string Dump() const override;
+};
+
+class ConstDefAST :public BaseAST {
+public:
+	std::string ident;
+	std::unique_ptr<SubBaseAST> constinitval;
+	std::string Dump() const override;
+};
+
+class ConstDeclAST :public BaseAST {
+public:
+	std::unique_ptr<BaseAST> btype;
+	std::unique_ptr<std::vector<std::unique_ptr<ConstDefAST>>>constdef;
+	std::string Dump() const override;
+};
+
+//int
+class BTypeAST :public BaseAST {
+public:
+	int b_typeid;
+	std::string Dump() const override;
+};
+
+class ConstInitValAST :public SubBaseAST {
+public:
+	std::unique_ptr<SubBaseAST> constexp;
+	std::string Dump() const override;
+	int Cal() const override;
+};
+
+class ConstExpAST :public SubBaseAST {
+public:
+	std::unique_ptr<SubBaseAST> exp;
+	std::string Dump() const override;
+	int Cal() const override;
+};
+
+class VarDefAST :public BaseAST {
+public:
+	std::string ident;
+	std::unique_ptr<SubBaseAST> initval;
+	std::string Dump() const override;
+};
+
+class VarDeclAST :public BaseAST {
+public:
+	std::unique_ptr<BaseAST> btype;
+	std::unique_ptr<std::vector<std::unique_ptr<VarDefAST>>>vardef;
+	std::string Dump() const override;
+};
+
+class InitValAST :public SubBaseAST {
+public:
+	std::unique_ptr<SubBaseAST> exp;
+	std::string Dump() const override;
+	int Cal() const override;
+};
+
+class LValAST :public SubBaseAST {
+public:
+	std::string ident;
+	std::string Dump() const override;
+	int Cal() const override;
+	std::string Assign() const;
+};
+
+
 class StmtAST :public BaseAST {
 public:
-	std::unique_ptr<BaseAST> exp;
+	std::unique_ptr<SubBaseAST> exp;
+	std::unique_ptr<LValAST> lval;
 	std::string Dump() const override;
 };
 
-class ExpAST :public BaseAST {
+class ExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> lorexp;
+	std::unique_ptr<SubBaseAST> lorexp;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class LOrExpAST :public BaseAST {
+class LOrExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> landexp;
-	std::unique_ptr<BaseAST> lorexp;
+	std::unique_ptr<SubBaseAST> landexp;
+	std::unique_ptr<SubBaseAST> lorexp;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class LAndExpAST :public BaseAST {
+class LAndExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> eqexp;
-	std::unique_ptr<BaseAST> landexp;
+	std::unique_ptr<SubBaseAST> eqexp;
+	std::unique_ptr<SubBaseAST> landexp;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class EqExpAST :public BaseAST {
+class EqExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> relexp;
-	std::unique_ptr<BaseAST> eqexp;
+	std::unique_ptr<SubBaseAST> relexp;
+	std::unique_ptr<SubBaseAST> eqexp;
 	int op;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class RelExpAST :public BaseAST {
+class RelExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> addexp;
-	std::unique_ptr<BaseAST> relexp;
+	std::unique_ptr<SubBaseAST> addexp;
+	std::unique_ptr<SubBaseAST> relexp;
 	int op;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class AddExpAST :public BaseAST {
+class AddExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> mulexp;
-	std::unique_ptr<BaseAST> addexp;
+	std::unique_ptr<SubBaseAST> mulexp;
+	std::unique_ptr<SubBaseAST> addexp;
 	int op;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class MulExpAST :public BaseAST {
+class MulExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> unaryexp;
-	std::unique_ptr<BaseAST> mulexp;
+	std::unique_ptr<SubBaseAST> unaryexp;
+	std::unique_ptr<SubBaseAST> mulexp;
 	int op;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class UnaryExpAST :public BaseAST {
+class UnaryExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> primaryexp;
-	std::unique_ptr<BaseAST> unaryop;
-	std::unique_ptr<BaseAST> unaryexp;
+	std::unique_ptr<SubBaseAST> primaryexp;
+	std::unique_ptr<SubBaseAST> unaryop;
+	std::unique_ptr<SubBaseAST> unaryexp;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class PrimaryExpAST :public BaseAST {
+class PrimaryExpAST :public SubBaseAST {
 public:
-	std::unique_ptr<BaseAST> exp;
+	std::unique_ptr<SubBaseAST> exp;
+	std::unique_ptr<LValAST> lval;
 	int number;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
-class UnaryOpAST :public BaseAST {
+
+
+class UnaryOpAST :public SubBaseAST {
 public:
 	int op_id;
 	std::string Dump() const override;
+	int Cal() const override;
 };
 
 #endif // !AST_H

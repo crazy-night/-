@@ -33,17 +33,27 @@ using namespace std;
   std::string *str_val;
   int int_val;
   BaseAST *ast_val;
+  SubBaseAST *sub_val;
+  LValAST *l_val;
+  std::vector<std::unique_ptr<BlockItemAST>> *bv_val;
+  std::vector<std::unique_ptr<ConstDefAST>> *cv_val;
+  std::vector<std::unique_ptr<VarDefAST>> *vv_val;
 }
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
 %token INT RETURN
-%token <str_val> IDENT OR AND EQ NE LE GE
+%token <str_val> IDENT CONST OR AND EQ NE LE GE
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Stmt Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
+%type <ast_val> FuncDef FuncType Block Decl ConstDecl BType Stmt VarDecl
+%type <sub_val> ConstInitVal InitVal ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
 %type <int_val> Number
+%type <l_val> LVal
+%type <cv_val> ConstDef
+%type <bv_val> BlockItem
+%type <vv_val> VarDef
 
 %%
 
@@ -90,24 +100,178 @@ FuncType
   ;
 
 Block
-  : '{' Stmt '}' {
+  : '{' '}' {
     auto ast = new BlockAST();
-    ast->stmt = unique_ptr<BaseAST>($2);
+    auto v = new vector<unique_ptr<BlockItemAST>>();
+    ast->blockitem = unique_ptr<vector<unique_ptr<BlockItemAST>>>(v);
+    $$ = ast;
+  }
+  | '{' BlockItem '}' {
+    auto ast = new BlockAST();
+    ast->blockitem = unique_ptr<vector<unique_ptr<BlockItemAST>>>($2);
     $$ = ast;
   }
   ;
 
-Stmt
-  : RETURN Exp ';' {
-    auto ast = new StmtAST();
-    ast->exp = unique_ptr<BaseAST>($2);
+BlockItem
+  : BlockItem Decl {
+    unique_ptr<BlockItemAST> ast(new BlockItemAST());
+    ast->decl = unique_ptr<BaseAST>($2);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  | BlockItem Stmt {
+    unique_ptr<BlockItemAST> ast(new BlockItemAST());
+    ast->stmt = unique_ptr<BaseAST>($2);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  | Decl {
+    auto v = new vector<unique_ptr<BlockItemAST>>();
+    unique_ptr<BlockItemAST> ast(new BlockItemAST());
+    ast->decl = unique_ptr<BaseAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | Stmt {
+    auto v = new vector<unique_ptr<BlockItemAST>>();
+    unique_ptr<BlockItemAST> ast(new BlockItemAST());
+    ast->stmt = unique_ptr<BaseAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  ;
+
+Decl
+  : ConstDecl {
+    auto ast = new DeclAST();
+    ast->constdecl = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | VarDecl {
+    auto ast = new DeclAST();
+    ast->vardecl = unique_ptr<BaseAST>($1);
     $$ = ast;
   }
   ;
+
+ConstDecl
+  : CONST BType ConstDef ';' {
+    auto ast = new ConstDeclAST();   
+    ast->btype = unique_ptr<BaseAST>($2);
+    ast->constdef = unique_ptr<vector<unique_ptr<ConstDefAST>>>($3);
+    $$ = ast;
+  }
+  ;
+
+BType
+  : INT {
+    auto ast = new BTypeAST();   
+    ast->b_typeid = 0;
+    $$ = ast;
+  }
+  ;
+ConstDef
+  : IDENT '=' ConstInitVal{
+    auto v = new vector<unique_ptr<ConstDefAST>>();
+    unique_ptr<ConstDefAST> ast(new ConstDefAST());   
+    ast->ident = *unique_ptr<string>($1);
+    ast->constinitval = unique_ptr<SubBaseAST>($3);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | ConstDef ',' IDENT '=' ConstInitVal{
+    unique_ptr<ConstDefAST> ast(new ConstDefAST()); 
+    ast->ident = *unique_ptr<string>($3);
+    ast->constinitval = unique_ptr<SubBaseAST>($5);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  ;
+
+ConstInitVal
+  : ConstExp {
+    auto ast = new ConstInitValAST();   
+    ast->constexp = unique_ptr<SubBaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+ConstExp
+  : Exp {
+    auto ast = new ConstExpAST();   
+    ast->exp = unique_ptr<SubBaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+VarDecl
+  : BType VarDef ';' {
+    auto ast = new VarDeclAST();   
+    ast->btype = unique_ptr<BaseAST>($1);
+    ast->vardef = unique_ptr<vector<unique_ptr<VarDefAST>>>($2);
+    $$ = ast;
+  }
+  ;
+
+VarDef
+  : IDENT '=' InitVal{
+    auto v = new vector<unique_ptr<VarDefAST>>();
+    unique_ptr<VarDefAST> ast(new VarDefAST());   
+    ast->ident = *unique_ptr<string>($1);
+    ast->initval = unique_ptr<SubBaseAST>($3);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | IDENT {
+    auto v = new vector<unique_ptr<VarDefAST>>();
+    unique_ptr<VarDefAST> ast(new VarDefAST());   
+    ast->ident = *unique_ptr<string>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | VarDef ',' IDENT '=' InitVal{
+    unique_ptr<VarDefAST> ast(new VarDefAST()); 
+    ast->ident = *unique_ptr<string>($3);
+    ast->initval = unique_ptr<SubBaseAST>($5);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  | VarDef ',' IDENT {
+    unique_ptr<VarDefAST> ast(new VarDefAST()); 
+    ast->ident = *unique_ptr<string>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  ;
+
+InitVal
+  : Exp {
+    auto ast = new InitValAST();   
+    ast->exp = unique_ptr<SubBaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+
+Stmt
+  : RETURN Exp ';' {
+    auto ast = new StmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($2);
+    $$ = ast;
+  }
+  | LVal '=' Exp ';' {
+    auto ast = new StmtAST();
+    ast->lval = unique_ptr<LValAST>($1);
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    $$ = ast;
+  }
+  ;
+
 Exp
   : LOrExp {
     auto ast = new ExpAST();
-    ast->lorexp = unique_ptr<BaseAST>($1);
+    ast->lorexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
   ;
@@ -115,13 +279,13 @@ Exp
 LOrExp
   : LAndExp {
     auto ast = new LOrExpAST();
-    ast->landexp = unique_ptr<BaseAST>($1);
+    ast->landexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | LOrExp OR LAndExp {
+  | LOrExp OR LAndExp {
     auto ast = new LOrExpAST();
-    ast->lorexp = unique_ptr<BaseAST>($1);
-    ast->landexp = unique_ptr<BaseAST>($3);
+    ast->lorexp = unique_ptr<SubBaseAST>($1);
+    ast->landexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -129,13 +293,13 @@ LOrExp
 LAndExp
   : EqExp {
     auto ast = new LAndExpAST();
-    ast->eqexp = unique_ptr<BaseAST>($1);
+    ast->eqexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | LAndExp AND EqExp {
+  | LAndExp AND EqExp {
     auto ast = new LAndExpAST();
-    ast->landexp = unique_ptr<BaseAST>($1);
-    ast->eqexp = unique_ptr<BaseAST>($3);
+    ast->landexp = unique_ptr<SubBaseAST>($1);
+    ast->eqexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -143,21 +307,21 @@ LAndExp
 EqExp
   : RelExp {
     auto ast = new EqExpAST();
-    ast->relexp = unique_ptr<BaseAST>($1);
+    ast->relexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | EqExp EQ RelExp {
+  | EqExp EQ RelExp {
     auto ast = new EqExpAST();
-    ast->eqexp = unique_ptr<BaseAST>($1);
+    ast->eqexp = unique_ptr<SubBaseAST>($1);
     ast->op = 0;
-    ast->relexp = unique_ptr<BaseAST>($3);
+    ast->relexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | EqExp NE RelExp {
+  | EqExp NE RelExp {
     auto ast = new EqExpAST();
-    ast->eqexp = unique_ptr<BaseAST>($1);
+    ast->eqexp = unique_ptr<SubBaseAST>($1);
     ast->op = 1;
-    ast->relexp = unique_ptr<BaseAST>($3);
+    ast->relexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -165,35 +329,35 @@ EqExp
 RelExp
   : AddExp {
     auto ast = new RelExpAST();
-    ast->addexp = unique_ptr<BaseAST>($1);
+    ast->addexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | RelExp '<' AddExp {
+  | RelExp '<' AddExp {
     auto ast = new RelExpAST();
-    ast->relexp = unique_ptr<BaseAST>($1);
+    ast->relexp = unique_ptr<SubBaseAST>($1);
     ast->op = 0;
-    ast->addexp = unique_ptr<BaseAST>($3);
+    ast->addexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | RelExp '>' AddExp {
+  | RelExp '>' AddExp {
     auto ast = new RelExpAST();
-    ast->relexp = unique_ptr<BaseAST>($1);
+    ast->relexp = unique_ptr<SubBaseAST>($1);
     ast->op = 1;
-    ast->addexp = unique_ptr<BaseAST>($3);
+    ast->addexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | RelExp LE AddExp {
+  | RelExp LE AddExp {
     auto ast = new RelExpAST();
-    ast->relexp = unique_ptr<BaseAST>($1);
+    ast->relexp = unique_ptr<SubBaseAST>($1);
     ast->op = 2;
-    ast->addexp = unique_ptr<BaseAST>($3);
+    ast->addexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | RelExp GE AddExp {
+  | RelExp GE AddExp {
     auto ast = new RelExpAST();
-    ast->relexp = unique_ptr<BaseAST>($1);
+    ast->relexp = unique_ptr<SubBaseAST>($1);
     ast->op = 3;
-    ast->addexp = unique_ptr<BaseAST>($3);
+    ast->addexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -201,21 +365,21 @@ RelExp
 AddExp
   : MulExp {
     auto ast = new AddExpAST();
-    ast->mulexp = unique_ptr<BaseAST>($1);
+    ast->mulexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | AddExp '+' MulExp {
+  | AddExp '+' MulExp {
     auto ast = new AddExpAST();
-    ast->addexp = unique_ptr<BaseAST>($1);
+    ast->addexp = unique_ptr<SubBaseAST>($1);
     ast->op = 0;
-    ast->mulexp = unique_ptr<BaseAST>($3);
+    ast->mulexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | AddExp '-' MulExp {
+  | AddExp '-' MulExp {
     auto ast = new AddExpAST();
-    ast->addexp = unique_ptr<BaseAST>($1);
+    ast->addexp = unique_ptr<SubBaseAST>($1);
     ast->op = 1;
-    ast->mulexp = unique_ptr<BaseAST>($3);
+    ast->mulexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -223,28 +387,28 @@ AddExp
 MulExp
   : UnaryExp {
     auto ast = new MulExpAST();
-    ast->unaryexp = unique_ptr<BaseAST>($1);
+    ast->unaryexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | MulExp '*' UnaryExp {
+  | MulExp '*' UnaryExp {
     auto ast = new MulExpAST();
-    ast->mulexp = unique_ptr<BaseAST>($1);
+    ast->mulexp = unique_ptr<SubBaseAST>($1);
     ast->op = 0;
-    ast->unaryexp = unique_ptr<BaseAST>($3);
+    ast->unaryexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
- | MulExp '/' UnaryExp {
+  | MulExp '/' UnaryExp {
     auto ast = new MulExpAST();
-    ast->mulexp = unique_ptr<BaseAST>($1);
+    ast->mulexp = unique_ptr<SubBaseAST>($1);
     ast->op = 1;
-    ast->unaryexp = unique_ptr<BaseAST>($3);
+    ast->unaryexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   | MulExp '%' UnaryExp {
     auto ast = new MulExpAST();
-    ast->mulexp = unique_ptr<BaseAST>($1);
+    ast->mulexp = unique_ptr<SubBaseAST>($1);
     ast->op = 2;
-    ast->unaryexp = unique_ptr<BaseAST>($3);
+    ast->unaryexp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   ;
@@ -252,13 +416,13 @@ MulExp
 UnaryExp
   : PrimaryExp {
     auto ast = new UnaryExpAST();
-    ast->primaryexp = unique_ptr<BaseAST>($1);
+    ast->primaryexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
   }
- | UnaryOp UnaryExp {
+  | UnaryOp UnaryExp {
     auto ast = new UnaryExpAST();
-    ast->unaryop = unique_ptr<BaseAST>($1);
-    ast->unaryexp = unique_ptr<BaseAST>($2);
+    ast->unaryop = unique_ptr<SubBaseAST>($1);
+    ast->unaryexp = unique_ptr<SubBaseAST>($2);
     $$ = ast;
   }
   ;
@@ -266,12 +430,25 @@ UnaryExp
 PrimaryExp
   : '(' Exp ')' {
     auto ast = new PrimaryExpAST();
-    ast->exp = unique_ptr<BaseAST>($2);
+    ast->exp = unique_ptr<SubBaseAST>($2);
     $$ = ast;
   }
- | Number {
+  | Number {
     auto ast = new PrimaryExpAST();
     ast->number= $1;
+    $$ = ast;
+  }
+  | LVal {
+    auto ast = new PrimaryExpAST();
+    ast->lval= unique_ptr<LValAST>($1);
+    $$ = ast;
+  }
+  ;
+
+LVal
+  : IDENT {
+    auto ast = new LValAST();
+    ast->ident = *unique_ptr<string>($1);
     $$ = ast;
   }
   ;
@@ -282,12 +459,12 @@ UnaryOp
   ast->op_id = 0;
   $$ = ast;
   }
-| '-'{
+  | '-'{
   auto ast = new UnaryOpAST();
   ast->op_id = 1;
   $$ = ast;
   }
-| '!'{
+  | '!'{
   auto ast = new UnaryOpAST();
   ast->op_id = 2;
   $$ = ast;
@@ -305,5 +482,6 @@ Number
 // 定义错误处理函数, 其中第二个参数是错误信息
 // parser 如果发生错误 (例如输入的程序出现了语法错误), 就会调用这个函数
 void yyerror(std::unique_ptr<BaseAST> &ast, const char *s) {
-  cerr << "error: " << s << endl;
+  std::string ss = ast->Dump();
+  cerr << "error: " << ss << endl;
 }
