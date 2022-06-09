@@ -43,7 +43,7 @@ using namespace std;
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
 %token INT RETURN
-%token <str_val> IDENT CONST OR AND EQ NE LE GE IF ELSE
+%token <str_val> IDENT CONST OR AND EQ NE LE GE IF ELSE WHILE BREAK CONTINUE
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
@@ -274,12 +274,6 @@ MatchedStmt
     ast->matchedstmt_2 = unique_ptr<BaseAST>($7);
     $$ = ast;
   }
-  | RETURN Exp ';' {
-    auto ast = new MatchedStmtAST();
-    ast->exp = unique_ptr<SubBaseAST>($2);
-    ast->flag = 1;
-    $$ = ast;
-  }
   | RETURN ';' {
     auto ast = new MatchedStmtAST();
     $$ = ast;
@@ -288,6 +282,22 @@ MatchedStmt
     auto ast = new MatchedStmtAST();
     ast->exp = unique_ptr<SubBaseAST>($1);
     ast->flag = 0;
+    $$ = ast;
+  }
+  | RETURN Exp ';' {
+    auto ast = new MatchedStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($2);
+    ast->flag = 1;
+    $$ = ast;
+  }
+  | CONTINUE ';' { 
+    auto ast = new MatchedStmtAST();
+    ast->flag = 2;
+    $$ = ast;
+  }
+  | BREAK ';'{
+    auto ast = new MatchedStmtAST();
+    ast->flag = 3;
     $$ = ast;
   }
   | ';'{
@@ -303,6 +313,12 @@ MatchedStmt
   | Block { 
     auto ast = new MatchedStmtAST();
     ast->block = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | WHILE '(' Exp ')' Stmt {
+    auto ast = new MatchedStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    ast->stmt = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
   ;
@@ -322,6 +338,7 @@ OpenStmt
     $$ = ast;
   }
   ;
+
 
 Exp
   : LOrExp {

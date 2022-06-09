@@ -7,7 +7,13 @@
 #include<cstdio>
 #include<cassert>
 #include<vector>
+#define END "end"
 
+struct Loop {
+	std::string begin;
+	std::string end;
+	Loop(int, int);
+};
 
 struct Symbol
 {
@@ -159,9 +165,11 @@ class MatchedStmtAST :public BaseAST {
 public:
 	std::unique_ptr<BaseAST> matchedstmt_1;
 	std::unique_ptr<BaseAST> matchedstmt_2;
+	std::unique_ptr<BaseAST> stmt;
 	std::unique_ptr<SubBaseAST> exp;
 	std::unique_ptr<LValAST> lval;
 	std::unique_ptr<BaseAST> block;
+	//»áÄ¬ÈÏÎª0
 	int flag;
 	std::string Dump() const override;
 };
@@ -174,6 +182,7 @@ public:
 	std::unique_ptr<SubBaseAST> exp;
 	std::string Dump() const override;
 };
+
 
 class ExpAST :public SubBaseAST {
 public:

@@ -6,13 +6,18 @@ int reg = 0;
 
 string Type[1] = { "i32" };
 string b_type[1] = { "int" };
-
+vector<Loop>loop;
 SymbolTable* cur_tab;
 
 //区别不同符号表重名符号
 int tab_num;
 int func_num;
 int entry_num;
+
+Loop::Loop(int x, int y) {
+	begin = "%entry_" + to_string(x);
+	end = "%entry_" + to_string(y);
+}
 
 string CompUnitAST::Dump() const {
 	code += "fun ";
@@ -50,9 +55,9 @@ string BlockAST::Dump()const {
 	block_symbol_table.pre = cur_tab;
 	cur_tab = &block_symbol_table;
 	for (auto it = blockitem->begin();it != blockitem->end();++it)
-		if ((*it)->Dump() == "Return") {
+		if ((*it)->Dump() == END) {
 			cur_tab = cur_tab->pre;
-			return "Return";
+			return END;
 		}
 	cur_tab = cur_tab->pre;
 	return "";
@@ -85,7 +90,7 @@ string BTypeAST::Dump()const {
 }
 
 string ConstDefAST::Dump()const {
-	if(exist(ident))
+	if (exist(ident))
 		assert(false);
 	Symbol s;
 	s.name = ident;
@@ -163,13 +168,31 @@ string MatchedStmtAST::Dump()const {
 		entry_num += 3;
 		code += "%entry_" + to_string(num) + ":\n";
 		ret = matchedstmt_1->Dump();
-		if (ret != "Return")
+		if (ret != END)
 			code += "  jump %entry_" + to_string(num + 2) + "\n";
 		code += "%entry_" + to_string(num + 1) + ":\n";
 		ret = matchedstmt_2->Dump();
-		if (ret != "Return")
+		if (ret != END)
 			code += "  jump %entry_" + to_string(num + 2) + "\n";
 		code += "%entry_" + to_string(num + 2) + ":\n";
+	}
+	else if (stmt != NULL) {
+		code += "  jump %entry_" + to_string(entry_num) + "\n";
+		code += "%entry_" + to_string(entry_num++) + ":\n";
+		int begin = entry_num - 1;
+		string value = exp->Dump();
+		string ret;
+		int num = entry_num;
+		Loop temp(begin, num + 1);
+		loop.push_back(temp);
+		code += "  br " + value + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+		entry_num += 2;
+		code += "%entry_" + to_string(num) + ":\n";
+		ret = stmt->Dump();
+		loop.pop_back();
+		if (ret != END)
+			code += "  jump %entry_" + to_string(begin) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
 	}
 	else {
 		if (exp != NULL) {
@@ -177,13 +200,21 @@ string MatchedStmtAST::Dump()const {
 			if (lval != NULL) {
 				code += "  store " + value + ", @" + lval->Assign() + "\n";
 			}
-			else if (flag) {
+			else if (flag == 1) {
 				code += "  ret " + value + "\n";
-				return "Return";
+				return END;
 			}
 		}
 		else if (block != NULL) {
 			return block->Dump();
+		}
+		else if (flag == 2) {
+			code += "  jump " + loop.back().begin + "\n";
+			return END;
+		}
+		else if (flag == 3) {
+			code += "  jump " + loop.back().end+ "\n";
+			return END;
 		}
 	}
 	return "MatchedStmtAST";
@@ -198,7 +229,7 @@ string OpenStmtAST::Dump()const {
 		entry_num += 2;
 		code += "%entry_" + to_string(num) + ":\n";
 		ret = stmt->Dump();
-		if (ret != "Return")
+		if (ret != END)
 			code += "  jump %entry_" + to_string(num + 1) + "\n";
 		code += "%entry_" + to_string(num + 1) + ":\n";
 	}
@@ -209,8 +240,8 @@ string OpenStmtAST::Dump()const {
 		code += "  br " + value + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
 		entry_num += 3;
 		code += "%entry_" + to_string(num) + ":\n";
-		ret=matchedstmt->Dump();
-		if (ret != "Return")
+		ret = matchedstmt->Dump();
+		if (ret != END)
 			code += "  jump %entry_" + to_string(num + 2) + "\n";
 		code += "%entry_" + to_string(num + 1) + ":\n";
 		openstmt->Dump();
@@ -237,6 +268,7 @@ string LOrExpAST::Dump()const {
 		code += "  %" + to_string(r) + " = alloc i32\n";
 		code += "  store 1, %" + to_string(r) + "\n";
 		string value_1 = lorexp->Dump();
+		//为了让非1非0变成1
 		code += "  %" + to_string(r + 1) + " = ne 0, " + value_1 + "\n";
 		code += "  br %" + to_string(r + 1) + ", %entry_" + to_string(num + 1) + ", %entry_" + to_string(num) + "\n";
 		code += "%entry_" + to_string(num) + ":\n";
@@ -269,13 +301,16 @@ string LAndExpAST::Dump()const {
 		string value_1 = landexp->Dump();
 		code += "  %" + to_string(r + 1) + " = ne 0, " + value_1 + "\n";
 		code += "  br %" + to_string(r + 1) + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+
 		code += "%entry_" + to_string(num) + ":\n";
 		string value_2 = eqexp->Dump();
 		code += "  %" + to_string(r + 2) + " = ne 0, " + value_2 + "\n";
 		code += "  store %" + to_string(r + 2) + ", %" + to_string(r) + "\n";
 		code += "  jump %entry_" + to_string(num + 1) + "\n";
+
 		code += "%entry_" + to_string(num + 1) + ":\n";
 		code += "  %" + to_string(r + 3) + " = load %" + to_string(r) + "\n";
+
 		return "%" + to_string(r + 3);
 	}
 	return eqexp->Dump();
