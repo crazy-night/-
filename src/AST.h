@@ -150,10 +150,28 @@ public:
 
 class StmtAST :public BaseAST {
 public:
+	std::unique_ptr<BaseAST> matchedstmt;
+	std::unique_ptr<BaseAST> openstmt;
+	std::string Dump() const override;
+};
+
+class MatchedStmtAST :public BaseAST {
+public:
+	std::unique_ptr<BaseAST> matchedstmt_1;
+	std::unique_ptr<BaseAST> matchedstmt_2;
 	std::unique_ptr<SubBaseAST> exp;
 	std::unique_ptr<LValAST> lval;
 	std::unique_ptr<BaseAST> block;
 	int flag;
+	std::string Dump() const override;
+};
+
+class OpenStmtAST :public BaseAST {
+public:
+	std::unique_ptr<BaseAST> matchedstmt;
+	std::unique_ptr<BaseAST> openstmt;
+	std::unique_ptr<BaseAST> stmt;
+	std::unique_ptr<SubBaseAST> exp;
 	std::string Dump() const override;
 };
 

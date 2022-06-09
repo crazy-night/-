@@ -12,12 +12,14 @@ SymbolTable* cur_tab;
 //区别不同符号表重名符号
 int tab_num;
 int func_num;
+int entry_num;
 
 string CompUnitAST::Dump() const {
 	code += "fun ";
 	SymbolTable global_symbol_table;
 	tab_num = 0;
 	func_num = 0;
+	entry_num = 0;
 	cur_tab = &global_symbol_table;
 	func_def->Dump();
 	return code;
@@ -48,17 +50,19 @@ string BlockAST::Dump()const {
 	block_symbol_table.pre = cur_tab;
 	cur_tab = &block_symbol_table;
 	for (auto it = blockitem->begin();it != blockitem->end();++it)
-		(*it)->Dump();
+		if ((*it)->Dump() == "Return") {
+			cur_tab = cur_tab->pre;
+			return "Return";
+		}
 	cur_tab = cur_tab->pre;
-	return "BlockAST";
+	return "";
 }
 
 string BlockItemAST::Dump()const {
 	if (decl != NULL)
-		decl->Dump();
+		return decl->Dump();
 	else
-		stmt->Dump();
-	return "BlockItemAST";
+		return stmt->Dump();;
 }
 
 string DeclAST::Dump()const {
@@ -141,21 +145,79 @@ int InitValAST::Cal()const {
 	return exp->Cal();
 }
 
-
 string StmtAST::Dump()const {
-	if (exp != NULL) {
+	if (matchedstmt != NULL) {
+		return matchedstmt->Dump();
+	}
+	else {
+		return openstmt->Dump();
+	}
+}
+
+string MatchedStmtAST::Dump()const {
+	if (matchedstmt_1 != NULL) {
 		string value = exp->Dump();
-		if (lval != NULL) {
-			code += "  store " + value + ", @" + lval->Assign() + "\n";
+		string ret;
+		int num = entry_num;
+		code += "  br " + value + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+		entry_num += 3;
+		code += "%entry_" + to_string(num) + ":\n";
+		ret = matchedstmt_1->Dump();
+		if (ret != "Return")
+			code += "  jump %entry_" + to_string(num + 2) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
+		ret = matchedstmt_2->Dump();
+		if (ret != "Return")
+			code += "  jump %entry_" + to_string(num + 2) + "\n";
+		code += "%entry_" + to_string(num + 2) + ":\n";
+	}
+	else {
+		if (exp != NULL) {
+			string value = exp->Dump();
+			if (lval != NULL) {
+				code += "  store " + value + ", @" + lval->Assign() + "\n";
+			}
+			else if (flag) {
+				code += "  ret " + value + "\n";
+				return "Return";
+			}
 		}
-		else if (flag) {
-			code += "  ret " + value + "\n";
+		else if (block != NULL) {
+			return block->Dump();
 		}
 	}
-	else if (block != NULL) {
-		block->Dump();
+	return "MatchedStmtAST";
+}
+
+string OpenStmtAST::Dump()const {
+	if (stmt != NULL) {
+		string value = exp->Dump();
+		string ret;
+		int num = entry_num;
+		code += "  br " + value + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+		entry_num += 2;
+		code += "%entry_" + to_string(num) + ":\n";
+		ret = stmt->Dump();
+		if (ret != "Return")
+			code += "  jump %entry_" + to_string(num + 1) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
 	}
-	return "StmtAST";
+	else {
+		string value = exp->Dump();
+		string ret;
+		int num = entry_num;
+		code += "  br " + value + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+		entry_num += 3;
+		code += "%entry_" + to_string(num) + ":\n";
+		ret=matchedstmt->Dump();
+		if (ret != "Return")
+			code += "  jump %entry_" + to_string(num + 2) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
+		openstmt->Dump();
+		code += "  jump %entry_" + to_string(num + 2) + "\n";
+		code += "%entry_" + to_string(num + 2) + ":\n";
+	}
+	return "OpenStmtAST";
 }
 
 string ExpAST::Dump() const {
@@ -168,12 +230,23 @@ int ExpAST::Cal()const {
 
 string LOrExpAST::Dump()const {
 	if (lorexp != NULL) {
+		int num = entry_num;
+		entry_num += 2;
+		int r = reg;
+		reg += 4;
+		code += "  %" + to_string(r) + " = alloc i32\n";
+		code += "  store 1, %" + to_string(r) + "\n";
 		string value_1 = lorexp->Dump();
-		string value_2 = " or ";
-		string value_3 = landexp->Dump();
-		code += "  %" + to_string(reg++) + " =" + value_2 + value_1 + ", " + value_3 + "\n";
-		code += "  %" + to_string(reg) + " = ne 0, %" + to_string(reg - 1) + "\n";
-		return "%" + to_string(reg++);
+		code += "  %" + to_string(r + 1) + " = ne 0, " + value_1 + "\n";
+		code += "  br %" + to_string(r + 1) + ", %entry_" + to_string(num + 1) + ", %entry_" + to_string(num) + "\n";
+		code += "%entry_" + to_string(num) + ":\n";
+		string value_2 = landexp->Dump();
+		code += "  %" + to_string(r + 2) + " = ne 0, " + value_2 + "\n";
+		code += "  store %" + to_string(r + 2) + ", %" + to_string(r) + "\n";
+		code += "  jump %entry_" + to_string(num + 1) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
+		code += "  %" + to_string(r + 3) + " = load %" + to_string(r) + "\n";
+		return "%" + to_string(r + 3);
 	}
 	return landexp->Dump();
 }
@@ -187,14 +260,23 @@ int LOrExpAST::Cal()const {
 
 string LAndExpAST::Dump()const {
 	if (landexp != NULL) {
+		int num = entry_num;
+		entry_num += 2;
+		int r = reg;
+		reg += 4;
+		code += "  %" + to_string(r) + " = alloc i32\n";
+		code += "  store 0, %" + to_string(r) + "\n";
 		string value_1 = landexp->Dump();
-		string value_3 = eqexp->Dump();
-		code += "  %" + to_string(reg++) + " = eq 0, " + value_1 + "\n";
-		code += "  %" + to_string(reg++) + " = eq 0, " + value_3 + "\n";
-		code += "  %" + to_string(reg) + " = or %" + to_string(reg - 1) + ", %" + to_string(reg - 2) + "\n";
-		++reg;
-		code += "  %" + to_string(reg) + " = eq 0, %" + to_string(reg - 1) + "\n";
-		return "%" + to_string(reg++);
+		code += "  %" + to_string(r + 1) + " = ne 0, " + value_1 + "\n";
+		code += "  br %" + to_string(r + 1) + ", %entry_" + to_string(num) + ", %entry_" + to_string(num + 1) + "\n";
+		code += "%entry_" + to_string(num) + ":\n";
+		string value_2 = eqexp->Dump();
+		code += "  %" + to_string(r + 2) + " = ne 0, " + value_2 + "\n";
+		code += "  store %" + to_string(r + 2) + ", %" + to_string(r) + "\n";
+		code += "  jump %entry_" + to_string(num + 1) + "\n";
+		code += "%entry_" + to_string(num + 1) + ":\n";
+		code += "  %" + to_string(r + 3) + " = load %" + to_string(r) + "\n";
+		return "%" + to_string(r + 3);
 	}
 	return eqexp->Dump();
 }

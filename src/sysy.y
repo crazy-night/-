@@ -43,11 +43,11 @@ using namespace std;
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
 %token INT RETURN
-%token <str_val> IDENT CONST OR AND EQ NE LE GE
+%token <str_val> IDENT CONST OR AND EQ NE LE GE IF ELSE
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Decl ConstDecl BType Stmt VarDecl
+%type <ast_val> FuncDef FuncType Block Decl ConstDecl BType Stmt VarDecl MatchedStmt OpenStmt
 %type <sub_val> ConstInitVal InitVal ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
 %type <int_val> Number
 %type <l_val> LVal
@@ -253,37 +253,72 @@ InitVal
   }
   ;
 
-
 Stmt
-  : RETURN Exp ';' {
+  : MatchedStmt {
     auto ast = new StmtAST();
+    ast->matchedstmt = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | OpenStmt {
+    auto ast = new StmtAST();
+    ast->openstmt = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+MatchedStmt
+  : IF '(' Exp ')' MatchedStmt ELSE MatchedStmt {    
+    auto ast = new MatchedStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    ast->matchedstmt_1 = unique_ptr<BaseAST>($5);
+    ast->matchedstmt_2 = unique_ptr<BaseAST>($7);
+    $$ = ast;
+  }
+  | RETURN Exp ';' {
+    auto ast = new MatchedStmtAST();
     ast->exp = unique_ptr<SubBaseAST>($2);
     ast->flag = 1;
     $$ = ast;
   }
   | RETURN ';' {
-    auto ast = new StmtAST();
+    auto ast = new MatchedStmtAST();
     $$ = ast;
   }
   | Exp ';' {
-    auto ast = new StmtAST();
+    auto ast = new MatchedStmtAST();
     ast->exp = unique_ptr<SubBaseAST>($1);
     ast->flag = 0;
     $$ = ast;
   }
   | ';'{
-    auto ast = new StmtAST();
+    auto ast = new MatchedStmtAST();
     $$ = ast;
   }
   | LVal '=' Exp ';' {
-    auto ast = new StmtAST();
+    auto ast = new MatchedStmtAST();
     ast->lval = unique_ptr<LValAST>($1);
     ast->exp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   | Block { 
-    auto ast = new StmtAST();
+    auto ast = new MatchedStmtAST();
     ast->block = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  ;
+
+OpenStmt
+  : IF '(' Exp ')' Stmt {    
+    auto ast = new OpenStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    ast->stmt = unique_ptr<BaseAST>($5);
+    $$ = ast;
+  }
+  | IF '(' Exp ')' MatchedStmt ELSE OpenStmt {    
+    auto ast = new OpenStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    ast->matchedstmt = unique_ptr<BaseAST>($5);
+    ast->openstmt = unique_ptr<BaseAST>($7);
     $$ = ast;
   }
   ;
