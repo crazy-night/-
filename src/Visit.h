@@ -4,6 +4,7 @@
 #include<string>
 #include<iostream>
 #include<map>
+#include<algorithm>
 #include"koopa.h"
 
 
@@ -13,6 +14,9 @@ std::string Visit(const koopa_raw_function_t&);
 int Cal(const koopa_raw_slice_t&);
 std::string Visit(const koopa_raw_basic_block_t&);
 std::string Visit(const koopa_raw_value_t&);
+std::string Visit(const koopa_raw_call_t&);
+std::string Visit(const koopa_raw_global_alloc_t&);
+std::string Visit(const koopa_raw_func_arg_ref_t&);
 std::string Visit(const koopa_raw_branch_t&);
 std::string Visit(const koopa_raw_jump_t&);
 std::string Visit(const koopa_raw_return_t&);

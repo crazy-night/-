@@ -7,6 +7,10 @@ string epilogue = "";
 map<koopa_raw_value_t, int>Map;
 int current;
 int reg_num = 0;
+bool ra = false;
+int calling = 0;
+bool ret_type = false;
+int stack_size = 0;
 
 int t[7] = { 0 };
 int a[7] = { 0 };
@@ -18,8 +22,10 @@ string Visit(const koopa_raw_program_t& program) {
 	text = "";
 	if (!Map.empty())
 		Map.clear();
-	text += "  .text\n";
-	Visit(program.values);
+	if (program.values.len) {
+		text += "  .data\n";
+		Visit(program.values);
+	}
 	Visit(program.funcs);
 	return "";
 }
@@ -53,27 +59,44 @@ string Visit(const koopa_raw_slice_t& slice) {
 // 访问函数
 string Visit(const koopa_raw_function_t& func) {
 	// 执行一些其他的必要操作
+	if (func->bbs.len == 0)
+		return "";
 	string name = parse(func->name);
+	ra = false;
+	text += "  .text\n";
 	text += "  .globl " + name + "\n" + name + ":\n";
-	int stack_size = Cal(func->bbs);
-	int m = stack_size % 16;
-	stack_size = m ? stack_size - m + 16 : stack_size;
-	if (stack_size > 2047) {
-		prologue = "  li t0, " + to_string(-stack_size) + "\n" + "  add sp, sp, t0\n";
-		epilogue = "  li t0, " + to_string(stack_size) + "\n" + "  add sp, sp, t0\n";
-	}
-	else {
-		prologue = "  addi sp, sp, " + to_string(-stack_size) + "\n";
-		epilogue = "  addi sp, sp, " + to_string(stack_size) + "\n";
+	stack_size = Cal(func->bbs);
+	prologue = "";
+	epilogue = "";
+	if (stack_size) {
+		int m = stack_size % 16;
+		stack_size = m ? stack_size - m + 16 : stack_size;
+		if (stack_size > 2047) {
+			prologue = "  li t0, " + to_string(-stack_size) + "\n" + "  add sp, sp, t0\n";
+			epilogue = "  li t0, " + to_string(stack_size) + "\n" + "  add sp, sp, t0\n";
+			if (ra) {
+				prologue += "  li t0, " + to_string(stack_size - 4) + "\n" + "  add t0, sp, t0\n" + "  sw ra, 0(t0)\n";
+				epilogue += "  li t0, " + to_string(stack_size - 4) + "\n" + "  add t0, sp, t0\n" + "  lw ra, 0(t0)\n";
+			}
+		}
+		else {
+			prologue = "  addi sp, sp, " + to_string(-stack_size) + "\n";
+			if (ra) {
+				prologue += "  sw ra, " + to_string(stack_size - 4) + "(sp)\n";
+				epilogue = "  lw ra, " + to_string(stack_size - 4) + "(sp)\n";
+			}
+			epilogue += "  addi sp, sp, " + to_string(stack_size) + "\n";
+		}
 	}
 	text += prologue;
-	current = 0;
 	// 访问所有基本块
 	Visit(func->bbs);
 	return "";
 }
 int Cal(const koopa_raw_slice_t& blocks) {
+	int s = 0;
 	int r = 0;
+	int a = 0;
 	for (size_t i = 0; i < blocks.len; ++i) {
 		auto ptr = blocks.buffer[i];
 		auto insts = reinterpret_cast<koopa_raw_basic_block_t>(ptr)->insts;
@@ -81,11 +104,19 @@ int Cal(const koopa_raw_slice_t& blocks) {
 			auto ptr = insts.buffer[j];
 			auto inst = reinterpret_cast<koopa_raw_value_t>(ptr);
 			if (inst->ty->tag != KOOPA_RTT_UNIT || inst->kind.tag == KOOPA_RVT_ALLOC) {
-				r += 4;
+				s += 4;
+			}
+			if (inst->kind.tag == KOOPA_RVT_CALL) {
+				r = 4;
+				a = max((int)inst->kind.data.call.args.len - 8, a);
 			}
 		}
 	}
-	return r;
+	if (r)
+		ra = true;
+	current = a * 4;
+	//text += "?" + to_string(s) + ":" + to_string(r) + "!" + to_string(a) + "\n";
+	return s + r + a * 4;
 }
 
 // 访问基本块
@@ -107,11 +138,27 @@ string Visit(const koopa_raw_value_t& value) {
 	auto it = Map.find(value);
 	if (it != Map.end()) {
 		int i = it->second;
+		if (i == -1)
+			return "a0";
+		if (i == -2) {
+			string reg = reg_distribute();
+			text += "  la " + reg + ", " + parse(it->first->name) + "\n";
+			text += "  lw " + reg + ", 0(" + reg + ")\n";
+			return reg;
+		}
 		string src = stack_lw(i);
 		string reg = reg_distribute();
 		text += "  lw " + reg + ", " + src + "\n";
 		return reg;
 	}
+	/*switch (value->ty->tag) {
+	case KOOPA_RTT_INT32:text += "0\n";break;
+	case KOOPA_RTT_UNIT:text += "1\n";break;
+	case KOOPA_RTT_ARRAY:text += "2\n";break;
+	case KOOPA_RTT_POINTER:text += "3\n";break;
+	default:break;
+	}*/
+	ret_type = (value->ty->tag != KOOPA_RTT_UNIT);
 	const auto& kind = value->kind;
 	switch (kind.tag) {
 	case KOOPA_RVT_ALLOC:
@@ -143,14 +190,26 @@ string Visit(const koopa_raw_value_t& value) {
 		Visit(kind.data.jump);
 		break;
 	case KOOPA_RVT_CALL:
+		Visit(kind.data.call);
+		if (ret_type) {
+			Map.insert(make_pair(value, current));
+			current += 4;
+		}
 		break;
 	case KOOPA_RVT_RETURN:
 		// 访问 return 指令
-		Visit(kind.data.ret);return"";
+		Visit(kind.data.ret);
+		return"";
 	case KOOPA_RVT_INTEGER:
 		// 访问 integer 指令
 		return Visit(kind.data.integer);
-
+	case KOOPA_RVT_GLOBAL_ALLOC:
+		text += "  .globl " + parse(value->name) + "\n" + parse(value->name) + ":\n";
+		Visit(kind.data.global_alloc);
+		Map.insert(make_pair(value, -2));
+		break;
+	case KOOPA_RVT_FUNC_ARG_REF:
+		return Visit(kind.data.func_arg_ref);
 	default:
 		// 其他类型暂时遇不到
 		assert(false);
@@ -161,8 +220,44 @@ string Visit(const koopa_raw_value_t& value) {
 // 访问对应类型指令的函数定义略
 // 视需求自行实现
 // ...
-
-
+string Visit(const koopa_raw_func_arg_ref_t& func_arg_ref) {
+	auto i = func_arg_ref.index;
+	if (i < 8)
+		return "a" + to_string(i);
+	else {
+		string src = stack_lw(stack_size + (i - 8) * 4);
+		text += "  lw t0, " + src + "\n";
+		return "t0";
+	}
+}
+string Visit(const koopa_raw_global_alloc_t& global_alloc) {
+	auto it = global_alloc.init;
+	if (it != NULL) {
+		switch (it->kind.tag)
+		{
+		case KOOPA_RVT_INTEGER:text += "  .word " + to_string(it->kind.data.integer.value) + "\n";break;
+		case KOOPA_RVT_ZERO_INIT:text += "  .zero 4\n";break;
+		case KOOPA_RVT_AGGREGATE:break;
+		default:
+			assert(false);
+		}
+	}
+	return "";
+}
+string Visit(const koopa_raw_call_t& call) {
+	string name = parse(call.callee->name);
+	calling = 1;
+	bool f = ret_type;
+	Visit(call.args);
+	calling = 0;
+	ret_type = f;
+	text += "  call " + name + "\n";
+	if (f) {
+		string reg = stack_lw(current);
+		text += "  sw a0, " + reg + "\n";
+	}
+	return "";
+}
 string Visit(const koopa_raw_branch_t& branch) {
 	string name = parse(branch.true_bb->name);
 	text += "  bnez " + Visit(branch.cond) + ", " + name + "\n";
@@ -190,7 +285,16 @@ string Visit(const koopa_raw_store_t& store) {
 	auto it = Map.find(store.dest);
 	if (it != Map.end()) {
 		int i = it->second;
-		d = stack_lw(i);
+		if (i == -1) {
+			d = "0(a0)";
+		}
+		else if (i == -2) {
+			string reg = reg_distribute();
+			text += "  la " + reg + ", " + parse(it->first->name) + "\n";
+			d = "0(" + reg + ")";
+		}
+		else
+			d = stack_lw(i);
 	}
 	else
 		assert(false);
@@ -200,8 +304,10 @@ string Visit(const koopa_raw_store_t& store) {
 }
 
 string Visit(const koopa_raw_return_t& ret) {
-	string ans = "  mv a0, " + Visit(ret.value) + "\n";
-	text += ans;
+	if (ret.value != NULL) {
+		string ans = "  mv a0, " + Visit(ret.value) + "\n";
+		text += ans;
+	}
 	text += epilogue + "  ret\n";
 	return "";
 }
@@ -213,6 +319,9 @@ string Visit(const koopa_raw_integer_t& integer) {
 		return "x0";
 	string reg = reg_distribute();
 	text += "  li " + reg + ", " + to_string(val) + "\n";
+	if (calling > 9) {
+		text += "  sw " + reg + ", " + to_string((calling - 10) * 4) + "(sp)\n";
+	}
 	return reg;
 }
 
@@ -276,6 +385,14 @@ string Visit(const koopa_raw_binary_t& binary) {
 }
 
 string reg_distribute() {
+	if (calling) {
+		if (calling < 9) {
+			string ans = "a" + to_string(calling - 1);
+			++calling;
+			return ans;
+		}
+		++calling;
+	}
 	reg_num++;
 	reg_num %= 7;
 	//reg_num = reg_num ? reg_num : reg_num + 1;

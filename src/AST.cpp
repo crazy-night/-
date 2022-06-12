@@ -5,48 +5,99 @@ int reg = 0;
 
 
 string Type[1] = { "i32" };
-string b_type[1] = { "int" };
 vector<Loop>loop;
-SymbolTable* cur_tab;
+SymbolTable global_symbol_table;
+SymbolTable* cur_tab = &global_symbol_table;
 
 //区别不同符号表重名符号
-int tab_num;
-int func_num;
-int entry_num;
+int tab_num = 0;
+int entry_num = 0;
 
 Loop::Loop(int x, int y) {
 	begin = "%entry_" + to_string(x);
 	end = "%entry_" + to_string(y);
 }
-
-string CompUnitAST::Dump() const {
-	code += "fun ";
-	SymbolTable global_symbol_table;
-	tab_num = 0;
-	func_num = 0;
-	entry_num = 0;
-	cur_tab = &global_symbol_table;
-	func_def->Dump();
+string StartAST::Dump() const {
+	init();
+	compunit->Dump();
 	return code;
 }
 
+string CompUnitAST::Dump() const {
+	if (compunit != NULL) {
+		compunit->Dump();
+	}
+	cur_tab = &global_symbol_table;
+	if (funcdef != NULL)
+		funcdef->Dump();
+	else
+		decl->Dump();
+	return "";
+}
+
 string FuncDefAST::Dump() const {
-	code += "@" + ident + "(): ";
+	code += "fun @" + ident + "(";
+
+	tab_num = 0;
+	entry_num = 0;
+	reg = 0;
+
+	Symbol s;
+	s.name = ident;
+	if (type->type_id == -1)
+		s.type = 4;
+	else s.type = 2;
+	s.depth = tab_num;
+	cur_tab->table.push_back(s);
 	SymbolTable func_symbol_table;
 	tab_num++;
 	func_symbol_table.pre = cur_tab;
 	cur_tab = &func_symbol_table;
-	code += func_type->Dump();
+	
+	for (auto it = funcfparam->begin();it != funcfparam->end();it++) {
+		if (it != funcfparam->begin())
+			code += ", ";
+		(*it)->Dump();
+
+	}
+	code+=")";
+	if (type->type_id != -1)
+		code += ": " + type->Dump();
 	code += " {\n%entry:\n";
-	block->Dump();
+
+	for (auto it = cur_tab->table.begin();it != cur_tab->table.end();it++) {
+		code += "  " + it->dump() + " = alloc "+Type[0] + "\n";
+		code += "  store @" + it->name + "_" + to_string(it->depth) + ", " + it->dump() + "\n";
+	}
+
+	
+	string ret = block->Dump();
+	if (ret != END && type->type_id == -1)
+		code += "  ret\n";
+
 	code += "}\n";
 	cur_tab = cur_tab->pre;
 	return "FuncDefAST";
 }
 
+
+string FuncFParamAST::Dump()const {
+	if (exist(ident))
+		assert(false);
+	Symbol s;
+	s.name = ident;
+	s.type = 3;
+	s.depth = tab_num;
+	cur_tab->table.push_back(s);
+	code += "@" + ident + "_"+to_string(tab_num) + ": " + type->Dump();
+	return "@" + ident +"_"+ to_string(tab_num);
+}
+
 // ...
-string FuncTypeAST::Dump() const {
-	return Type[func_typeid];
+string TypeAST::Dump() const {
+	if (type_id == -1)
+		return "";
+	return Type[type_id];
 }
 
 string BlockAST::Dump()const {
@@ -79,15 +130,13 @@ string DeclAST::Dump()const {
 }
 
 string ConstDeclAST::Dump()const {
-	string t = btype->Dump();
+	string t = type->Dump();
 	for (auto it = constdef->begin();it != constdef->end();++it)
 		(*it)->Dump();
 	return "ConstDeclAST";
 }
 
-string BTypeAST::Dump()const {
-	return b_type[b_typeid];
-}
+
 
 string ConstDefAST::Dump()const {
 	if (exist(ident))
@@ -118,7 +167,7 @@ int ConstExpAST::Cal()const {
 }
 
 string VarDeclAST::Dump()const {
-	string t = btype->Dump();
+	string t = type->Dump();
 	string ans;
 	for (auto it = vardef->begin();it != vardef->end();++it) {
 		(*it)->Dump();
@@ -134,12 +183,25 @@ string VarDefAST::Dump()const {
 	s.type = 1;
 	s.depth = tab_num;
 	cur_tab->table.push_back(s);
-	code += "  @" + s.dump() + " = alloc " + Type[0] + "\n";
-	if (initval != NULL) {
-		string ans = initval->Dump();
-		code += "  store " + ans + ", @" + s.dump() + "\n";
+	if (cur_tab->pre != NULL) {
+		code += "  " + s.dump() + " = alloc " + Type[0] + "\n";
+		if (initval != NULL) {
+			string ans = initval->Dump();
+			code += "  store " + ans + ", " + s.dump() + "\n";
+		}
 	}
-	return "  @" + s.dump();
+	else {
+		code += "global " + s.dump() + " = alloc " + Type[0];
+		if (initval != NULL) {
+			string ans = initval->Dump();
+			if (ans != "0") {
+				code += ", " + ans + "\n";
+				return s.dump();
+			}
+		}
+		code += ", zeroinit\n";
+	}
+	return s.dump();
 }
 
 string InitValAST::Dump()const {
@@ -195,18 +257,22 @@ string MatchedStmtAST::Dump()const {
 		code += "%entry_" + to_string(num + 1) + ":\n";
 	}
 	else {
-		if (exp != NULL) {
+		if (block != NULL) {
+			return block->Dump();
+		}
+		else if (exp != NULL) {
 			string value = exp->Dump();
 			if (lval != NULL) {
-				code += "  store " + value + ", @" + lval->Assign() + "\n";
+				code += "  store " + value + ", " + lval->Assign() + "\n";
 			}
 			else if (flag == 1) {
 				code += "  ret " + value + "\n";
 				return END;
 			}
 		}
-		else if (block != NULL) {
-			return block->Dump();
+		else if (flag == 1) {
+			code += "  ret\n";
+			return END;
 		}
 		else if (flag == 2) {
 			code += "  jump " + loop.back().begin + "\n";
@@ -437,24 +503,55 @@ int MulExpAST::Cal()const {
 	return unaryexp->Cal();
 }
 
+string FuncRParamAST::Dump()const {
+	return exp->Dump();
+}
+
 
 string UnaryExpAST::Dump() const {
 	if (primaryexp != NULL) {
 		return primaryexp->Dump();
 	}
-	string value_1 = unaryexp->Dump();
-	string value_2 = unaryop->Dump();
-	if (value_2 != "") {
-		code += "  %" + to_string(reg) + " =" + value_2 + "0, " + value_1 + "\n";
+	if (unaryexp != NULL) {
+		string value_1 = unaryexp->Dump();
+		string value_2 = unaryop->Dump();
+		if (value_2 != "") {
+			code += "  %" + to_string(reg) + " =" + value_2 + "0, " + value_1 + "\n";
+			return "%" + to_string(reg++);
+		}
+		return value_1;
+	}
+	auto s = find(ident);
+	string ans = "";
+	if (s.type != 4) {
+		for (auto it = funcrparam->begin();it != funcrparam->end();++it) {
+			if (it != funcrparam->begin())
+				ans += ", ";
+			ans += (*it)->Dump();
+		}
+		ans += ")\n";
+		string head = "  %" + to_string(reg) + " = call @" + s.dump() + "(";
+		code += head + ans;
 		return "%" + to_string(reg++);
 	}
-	return value_1;
+	else {
+		for (auto it = funcrparam->begin();it != funcrparam->end();++it) {
+			if (it != funcrparam->begin())
+				ans += ", ";
+			ans += (*it)->Dump();
+		}
+		ans += ")\n";
+		string head = "  call @" + s.dump() + "(";
+		code += head + ans;
+		return "";
+	}
 }
 
 int UnaryExpAST::Cal()const {
 	if (primaryexp != NULL) {
 		return primaryexp->Cal();
 	}
+
 	switch (unaryop->Cal()) {
 	case 0:return unaryexp->Cal();
 	case 1:return -unaryexp->Cal();
@@ -462,6 +559,8 @@ int UnaryExpAST::Cal()const {
 	default:assert(false);
 	}
 	return unaryexp->Cal();
+
+
 }
 
 string PrimaryExpAST::Dump()const {
@@ -483,8 +582,8 @@ int PrimaryExpAST::Cal()const {
 
 string LValAST::Dump()const {
 	auto it = find(ident);
-	if (it.type) {
-		code += "  %" + to_string(reg) + " = load @" + it.dump() + "\n";
+	if (it.type == 1 || it.type == 3) {
+		code += "  %" + to_string(reg) + " = load " + it.dump() + "\n";
 		return "%" + to_string(reg++);
 	}
 	return to_string(it.value);
@@ -496,7 +595,7 @@ int LValAST::Cal()const {
 
 string LValAST::Assign()const {
 	auto it = find(ident);
-	if (it.type) {
+	if (it.type == 1) {
 		return it.dump();
 	}
 	assert(false);
@@ -521,7 +620,14 @@ int UnaryOpAST::Cal()const {
 }
 
 string Symbol::dump() {
-	return name + "_" + to_string(depth);
+	string prefix = "";
+	if (type == 2 || type == 4)
+		return name;
+	if (type == 1)
+		prefix += "@";
+	else if (type == 3)
+		prefix += "%";
+	return prefix + name + "_" + to_string(depth);
 }
 
 Symbol find(string name) {
@@ -542,4 +648,49 @@ bool exist(string name) {
 			return true;
 	}
 	return false;
+}
+
+
+void init() {
+	code += "decl @getint(): i32\n";
+	code += "decl @getch(): i32\n";
+	code += "decl @getarray(*i32): i32\n";
+	code += "decl @putint(i32)\n";
+	code += "decl @putch(i32)\n";
+	code += "decl @putarray(i32, *i32)\n";
+	code += "decl @starttime()\n";
+	code += "decl @stoptime()\n";
+	Symbol s;
+	s.name = "getint";
+	s.type = 2;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "getch";
+	s.type = 2;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "getarray";
+	s.type = 2;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "putint";
+	s.type = 4;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "putch";
+	s.type = 4;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "putarray";
+	s.type = 4;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "starttime";
+	s.type = 4;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
+	s.name = "stoptime";
+	s.type = 4;
+	s.depth = 0;
+	cur_tab->table.push_back(s);
 }

@@ -35,25 +35,31 @@ using namespace std;
   BaseAST *ast_val;
   SubBaseAST *sub_val;
   LValAST *l_val;
+  TypeAST *t_val;
   std::vector<std::unique_ptr<BlockItemAST>> *bv_val;
   std::vector<std::unique_ptr<ConstDefAST>> *cv_val;
   std::vector<std::unique_ptr<VarDefAST>> *vv_val;
+  std::vector<std::unique_ptr<FuncFParamAST>> *ffv_val;
+  std::vector<std::unique_ptr<FuncRParamAST>> *frv_val;
 }
 
 // lexer 返回的所有 token 种类的声明
 // 注意 IDENT 和 INT_CONST 会返回 token 的值, 分别对应 str_val 和 int_val
-%token INT RETURN
-%token <str_val> IDENT CONST OR AND EQ NE LE GE IF ELSE WHILE BREAK CONTINUE
+%token INT RETURN VOID CONST IF ELSE WHILE BREAK CONTINUE OR AND EQ NE LE GE
+%token <str_val> IDENT
 %token <int_val> INT_CONST
 
 // 非终结符的类型定义
-%type <ast_val> FuncDef FuncType Block Decl ConstDecl BType Stmt VarDecl MatchedStmt OpenStmt
+%type <ast_val> FuncDef Block Decl ConstDecl Stmt VarDecl MatchedStmt OpenStmt CompUnit
 %type <sub_val> ConstInitVal InitVal ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
 %type <int_val> Number
 %type <l_val> LVal
+%type <t_val> Type
 %type <cv_val> ConstDef
 %type <bv_val> BlockItem
 %type <vv_val> VarDef
+%type <ffv_val> FuncFParam
+%type <frv_val> FuncRParam
 
 %%
 
@@ -62,11 +68,35 @@ using namespace std;
 // 而 parser 一旦解析完 CompUnit, 就说明所有的 token 都被解析了, 即解析结束了
 // 此时我们应该把 FuncDef 返回的结果收集起来, 作为 AST 传给调用 parser 的函数
 // $1 指代规则里第一个符号的返回值, 也就是 FuncDef 的返回值
+Start
+  : CompUnit {
+    auto start = make_unique<StartAST>();
+    start->compunit = unique_ptr<BaseAST>($1);
+    ast = move(start);
+  }
+
 CompUnit
   : FuncDef {
-    auto comp_unit = make_unique<CompUnitAST>();
-    comp_unit->func_def = unique_ptr<BaseAST>($1);
-    ast = move(comp_unit);
+    auto ast = new CompUnitAST();
+    ast->funcdef = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | Decl {
+    auto ast = new CompUnitAST();
+    ast->decl = unique_ptr<BaseAST>($1);
+    $$ = ast;
+  }
+  | CompUnit FuncDef {
+    auto ast = new CompUnitAST();
+    ast->compunit = unique_ptr<BaseAST>($1);
+    ast->funcdef = unique_ptr<BaseAST>($2);
+    $$ = ast;
+  }
+  | CompUnit Decl {
+    auto ast = new CompUnitAST();
+    ast->compunit = unique_ptr<BaseAST>($1);
+    ast->decl = unique_ptr<BaseAST>($2);
+    $$ = ast;
   }
   ;
 
@@ -81,24 +111,55 @@ CompUnit
 // 虽然此处你看不出用 unique_ptr 和手动 delete 的区别, 但当我们定义了 AST 之后
 // 这种写法会省下很多内存管理的负担
 FuncDef
-  : FuncType IDENT '(' ')' Block {
+  : Type IDENT '(' ')' Block {
     auto ast = new FuncDefAST();
-    ast->func_type = unique_ptr<BaseAST>($1);
+    ast->type = unique_ptr<TypeAST>($1);
     ast->ident = *unique_ptr<string>($2);
+    auto v = new vector<unique_ptr<FuncFParamAST>>();
+    ast->funcfparam = unique_ptr<vector<unique_ptr<FuncFParamAST>>>(v);
     ast->block = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
-  ;
-
-// 同上, 不再解释
-FuncType
-  : INT {
-    auto ast = new FuncTypeAST();
-    ast->func_typeid = 0;
+  | Type IDENT '(' FuncFParam ')' Block {
+    auto ast = new FuncDefAST();
+    ast->type = unique_ptr<TypeAST>($1);
+    ast->ident = *unique_ptr<string>($2);
+    ast->funcfparam = unique_ptr<vector<unique_ptr<FuncFParamAST>>>($4);
+    ast->block = unique_ptr<BaseAST>($6);
     $$ = ast;
   }
   ;
 
+FuncFParam
+  : Type IDENT { 
+    auto v = new vector<unique_ptr<FuncFParamAST>>();
+    unique_ptr<FuncFParamAST> ast(new FuncFParamAST());
+    ast->type = unique_ptr<TypeAST>($1);
+    ast->ident = *unique_ptr<string>($2);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | FuncFParam ',' Type IDENT {
+    unique_ptr<FuncFParamAST> ast(new FuncFParamAST());
+    ast->type = unique_ptr<TypeAST>($3);
+    ast->ident = *unique_ptr<string>($4);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  ;
+// 同上, 不再解释
+Type
+  : INT {
+    auto ast = new TypeAST();
+    ast->type_id = 0;
+    $$ = ast;
+  }
+  | VOID {
+    auto ast = new TypeAST();
+    ast->type_id = -1;
+    $$ = ast;
+  }
+  ;
 Block
   : '{' '}' {
     auto ast = new BlockAST();
@@ -156,21 +217,14 @@ Decl
   ;
 
 ConstDecl
-  : CONST BType ConstDef ';' {
+  : CONST Type ConstDef ';' {
     auto ast = new ConstDeclAST();   
-    ast->btype = unique_ptr<BaseAST>($2);
+    ast->type = unique_ptr<TypeAST>($2);
     ast->constdef = unique_ptr<vector<unique_ptr<ConstDefAST>>>($3);
     $$ = ast;
   }
   ;
 
-BType
-  : INT {
-    auto ast = new BTypeAST();   
-    ast->b_typeid = 0;
-    $$ = ast;
-  }
-  ;
 ConstDef
   : IDENT '=' ConstInitVal{
     auto v = new vector<unique_ptr<ConstDefAST>>();
@@ -206,9 +260,9 @@ ConstExp
   ;
 
 VarDecl
-  : BType VarDef ';' {
+  : Type VarDef ';' {
     auto ast = new VarDeclAST();   
-    ast->btype = unique_ptr<BaseAST>($1);
+    ast->type = unique_ptr<TypeAST>($1);
     ast->vardef = unique_ptr<vector<unique_ptr<VarDefAST>>>($2);
     $$ = ast;
   }
@@ -252,7 +306,7 @@ InitVal
     $$ = ast;
   }
   ;
-
+//此处若采用书上做法当读完MatchedStmt时会产生移进/规约冲突,Bison默认选择移进后续的ELSE
 Stmt
   : MatchedStmt {
     auto ast = new StmtAST();
@@ -276,6 +330,7 @@ MatchedStmt
   }
   | RETURN ';' {
     auto ast = new MatchedStmtAST();
+    ast->flag = 1;
     $$ = ast;
   }
   | Exp ';' {
@@ -497,6 +552,36 @@ UnaryExp
     ast->unaryexp = unique_ptr<SubBaseAST>($2);
     $$ = ast;
   }
+  | IDENT '(' ')' {
+    auto ast = new UnaryExpAST();
+    ast->ident = *unique_ptr<string>($1);
+    auto v = new vector<unique_ptr<FuncRParamAST>>();
+    ast->funcrparam = unique_ptr<vector<unique_ptr<FuncRParamAST>>>(v);
+    $$ = ast;
+  }
+  | IDENT '(' FuncRParam ')' {
+    auto ast = new UnaryExpAST();
+    ast->ident = *unique_ptr<string>($1);
+    ast->funcrparam = unique_ptr<vector<unique_ptr<FuncRParamAST>>>($3);
+    $$ = ast;
+  }
+  ;
+
+FuncRParam
+  : Exp { 
+    auto v = new vector<unique_ptr<FuncRParamAST>>();
+    unique_ptr<FuncRParamAST> ast(new FuncRParamAST());
+    ast->exp = unique_ptr<SubBaseAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | FuncRParam ',' Exp {
+    unique_ptr<FuncRParamAST> ast(new FuncRParamAST());
+    ast->exp = unique_ptr<SubBaseAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
+  }
+  ;
   ;
 
 PrimaryExp
