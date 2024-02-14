@@ -1,0 +1,7 @@
+docker run -it --rm -v E:\Compiler\mycompiler:/root/compiler maxxing/compiler-dev bash
+  autotest -koopa -s lv3 /root/compiler
+
+cd /root/compiler
+make
+build/compiler -koopa hello.c -o hello.koopa
+

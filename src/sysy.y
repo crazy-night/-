@@ -36,11 +36,14 @@ using namespace std;
   SubBaseAST *sub_val;
   LValAST *l_val;
   TypeAST *t_val;
-  std::vector<std::unique_ptr<BlockItemAST>> *bv_val;
-  std::vector<std::unique_ptr<ConstDefAST>> *cv_val;
-  std::vector<std::unique_ptr<VarDefAST>> *vv_val;
-  std::vector<std::unique_ptr<FuncFParamAST>> *ffv_val;
-  std::vector<std::unique_ptr<FuncRParamAST>> *frv_val;
+  FuncFParamAST *ffp_val;
+  ConstDefAST *cd_val;
+  VarDefAST *vd_val;
+  std::vector<std::unique_ptr<BlockItemAST>> *bi_vals;
+  std::vector<std::unique_ptr<ConstDefAST>> *cd_vals;
+  std::vector<std::unique_ptr<VarDefAST>> *vd_vals;
+  std::vector<std::unique_ptr<FuncFParamAST>> *ffp_vals;
+  std::vector<std::unique_ptr<FuncRParamAST>> *frp_vals;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -52,14 +55,17 @@ using namespace std;
 // 非终结符的类型定义
 %type <ast_val> FuncDef Block Decl ConstDecl Stmt VarDecl MatchedStmt OpenStmt CompUnit
 %type <sub_val> ConstInitVal InitVal ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
-%type <int_val> Number
 %type <l_val> LVal
 %type <t_val> Type
-%type <cv_val> ConstDef
-%type <bv_val> BlockItem
-%type <vv_val> VarDef
-%type <ffv_val> FuncFParam
-%type <frv_val> FuncRParam
+%type <int_val>Number
+%type <cd_vals> ConstDefs
+%type <cd_val> ConstDef
+%type <bi_vals> BlockItem
+%type <vd_vals> VarDefs
+%type <vd_val> VarDef
+%type <ffp_vals> FuncFParams
+%type <ffp_val> FuncFParam
+%type <frp_vals> FuncRParam
 
 %%
 
@@ -74,7 +80,10 @@ Start
     start->compunit = unique_ptr<BaseAST>($1);
     ast = move(start);
   }
+  ;
 
+// CompUnit ::= [CompUnit] (Decl | FuncDef);
+// []表示0个或者1个
 CompUnit
   : FuncDef {
     auto ast = new CompUnitAST();
@@ -100,7 +109,7 @@ CompUnit
   }
   ;
 
-// FuncDef ::= FuncType IDENT '(' ')' Block;
+// FuncDef ::= FuncType IDENT "(" [FuncFParams] ")" Block;
 // 我们这里可以直接写 '(' 和 ')', 因为之前在 lexer 里已经处理了单个字符的情况
 // 解析完成后, 把这些符号的结果收集起来, 然后拼成一个新的字符串, 作为结果返回
 // $$ 表示非终结符的返回值, 我们可以通过给这个符号赋值的方法来返回结果
@@ -120,7 +129,7 @@ FuncDef
     ast->block = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
-  | Type IDENT '(' FuncFParam ')' Block {
+  | Type IDENT '(' FuncFParams ')' Block {
     auto ast = new FuncDefAST();
     ast->type = unique_ptr<TypeAST>($1);
     ast->ident = *unique_ptr<string>($2);
@@ -130,24 +139,34 @@ FuncDef
   }
   ;
 
-FuncFParam
-  : Type IDENT { 
+// FuncFParams ::= FuncFParam {"," FuncFParam};
+//此处使用move，因为vecto的push_back是深拷贝，防止注销指针;
+FuncFParams
+  : FuncFParam {
     auto v = new vector<unique_ptr<FuncFParamAST>>();
-    unique_ptr<FuncFParamAST> ast(new FuncFParamAST());
-    ast->type = unique_ptr<TypeAST>($1);
-    ast->ident = *unique_ptr<string>($2);
+    auto ast = unique_ptr<FuncFParamAST>($1);
     v->push_back(move(ast));
     $$ = v;
   }
-  | FuncFParam ',' Type IDENT {
-    unique_ptr<FuncFParamAST> ast(new FuncFParamAST());
-    ast->type = unique_ptr<TypeAST>($3);
-    ast->ident = *unique_ptr<string>($4);
+  | FuncFParams ',' FuncFParam {
+    auto ast = unique_ptr<FuncFParamAST>($3);
     $1->push_back(move(ast));
     $$ = $1;
   }
   ;
-// 同上, 不再解释
+
+// FuncFParam ::= BType IDENT;
+FuncFParam
+  : Type IDENT { 
+    auto ast = new FuncFParamAST();
+    ast->type = unique_ptr<TypeAST>($1);
+    ast->ident = *unique_ptr<string>($2);
+    $$ = ast;
+  }
+  ;
+
+// FuncType ::= "void" | "int";
+// BType ::= "int";
 Type
   : INT {
     auto ast = new TypeAST();
@@ -160,6 +179,8 @@ Type
     $$ = ast;
   }
   ;
+
+// Block ::= "{" {BlockItem} "}";
 Block
   : '{' '}' {
     auto ast = new BlockAST();
@@ -174,6 +195,7 @@ Block
   }
   ;
 
+// BlockItem ::= Decl | Stmt;
 BlockItem
   : BlockItem Decl {
     unique_ptr<BlockItemAST> ast(new BlockItemAST());
@@ -203,6 +225,7 @@ BlockItem
   }
   ;
 
+// Decl ::= ConstDecl | VarDecl;
 Decl
   : ConstDecl {
     auto ast = new DeclAST();
@@ -216,8 +239,9 @@ Decl
   }
   ;
 
+// ConstDecl ::= "const" BType ConstDefs ";";
 ConstDecl
-  : CONST Type ConstDef ';' {
+  : CONST Type ConstDefs ';' {
     auto ast = new ConstDeclAST();   
     ast->type = unique_ptr<TypeAST>($2);
     ast->constdef = unique_ptr<vector<unique_ptr<ConstDefAST>>>($3);
@@ -225,24 +249,32 @@ ConstDecl
   }
   ;
 
-ConstDef
-  : IDENT '=' ConstInitVal{
+// ConstDefs ::= ConstDef | ConstDefs "," ConstDef;
+ConstDefs
+  : ConstDef {
     auto v = new vector<unique_ptr<ConstDefAST>>();
-    unique_ptr<ConstDefAST> ast(new ConstDefAST());   
-    ast->ident = *unique_ptr<string>($1);
-    ast->constinitval = unique_ptr<SubBaseAST>($3);
+    auto ast = unique_ptr<ConstDefAST>($1);
     v->push_back(move(ast));
     $$ = v;
-  }
-  | ConstDef ',' IDENT '=' ConstInitVal{
-    unique_ptr<ConstDefAST> ast(new ConstDefAST()); 
-    ast->ident = *unique_ptr<string>($3);
-    ast->constinitval = unique_ptr<SubBaseAST>($5);
+    }
+    | ConstDefs ',' ConstDef {
+    auto ast =unique_ptr<ConstDefAST>($3);
     $1->push_back(move(ast));
     $$ = $1;
+    }
+    ;
+
+// ConstDef ::= IDENT ["[" ConstExp "]"] "=" ConstInitVal;
+ConstDef
+  : IDENT '=' ConstInitVal {
+    auto ast = new ConstDefAST();   
+    ast->ident = *unique_ptr<string>($1);
+    ast->constinitval = unique_ptr<SubBaseAST>($3);
+    $$ = ast;
   }
   ;
 
+// ConstInitVal ::= ConstExp;
 ConstInitVal
   : ConstExp {
     auto ast = new ConstInitValAST();   
@@ -251,6 +283,7 @@ ConstInitVal
   }
   ;
 
+// ConstExp ::= Exp;
 ConstExp
   : Exp {
     auto ast = new ConstExpAST();   
@@ -259,8 +292,9 @@ ConstExp
   }
   ;
 
+// VarDecl ::= BType VarDefs ";";
 VarDecl
-  : Type VarDef ';' {
+  : Type VarDefs ';' {
     auto ast = new VarDeclAST();   
     ast->type = unique_ptr<TypeAST>($1);
     ast->vardef = unique_ptr<vector<unique_ptr<VarDefAST>>>($2);
@@ -268,37 +302,40 @@ VarDecl
   }
   ;
 
-VarDef
-  : IDENT '=' InitVal{
+// VarDefs ::= VarDef | VarDefs "," VarDef
+VarDefs
+  : VarDef {
     auto v = new vector<unique_ptr<VarDefAST>>();
-    unique_ptr<VarDefAST> ast(new VarDefAST());   
+    auto ast = unique_ptr<VarDefAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+    }
+    | VarDefs "," VarDef {
+    auto ast =unique_ptr<VarDefAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
+    }
+    ;
+
+
+
+// VarDef ::= IDENT | IDENT "=" InitVal;
+VarDef
+  : IDENT {
+    auto ast = new VarDefAST();   
+    ast->ident = *unique_ptr<string>($1);
+    $$ = ast;
+  }
+  | IDENT '=' InitVal{
+    auto ast =new VarDefAST();   
     ast->ident = *unique_ptr<string>($1);
     ast->initval = unique_ptr<SubBaseAST>($3);
-    v->push_back(move(ast));
-    $$ = v;
-  }
-  | IDENT {
-    auto v = new vector<unique_ptr<VarDefAST>>();
-    unique_ptr<VarDefAST> ast(new VarDefAST());   
-    ast->ident = *unique_ptr<string>($1);
-    v->push_back(move(ast));
-    $$ = v;
-  }
-  | VarDef ',' IDENT '=' InitVal{
-    unique_ptr<VarDefAST> ast(new VarDefAST()); 
-    ast->ident = *unique_ptr<string>($3);
-    ast->initval = unique_ptr<SubBaseAST>($5);
-    $1->push_back(move(ast));
-    $$ = $1;
-  }
-  | VarDef ',' IDENT {
-    unique_ptr<VarDefAST> ast(new VarDefAST()); 
-    ast->ident = *unique_ptr<string>($3);
-    $1->push_back(move(ast));
-    $$ = $1;
+    $$ = ast;
   }
   ;
 
+
+// InitVal ::= Exp;
 InitVal
   : Exp {
     auto ast = new InitValAST();   
@@ -306,7 +343,9 @@ InitVal
     $$ = ast;
   }
   ;
-//此处若采用书上做法当读完MatchedStmt时会产生移进/规约冲突,Bison默认选择移进后续的ELSE
+
+// Stmt ::= MatchedStmt | OpenStmt;
+// 此处若采用书上做法当读完MatchedStmt时会产生移进/规约冲突,Bison默认选择移进后续的ELSE
 Stmt
   : MatchedStmt {
     auto ast = new StmtAST();
@@ -320,6 +359,16 @@ Stmt
   }
   ;
 
+/* MatchedStmt ::= "if" "(" Exp ")" MatchedStmt "else" MatchedStmt
+                |  LVal "=" Exp ";"
+                | [Exp] ";"
+                | Block
+                | "if" "(" Exp ")" Stmt ["else" Stmt]
+                | "while" "(" Exp ")" Stmt
+                | "break" ";"
+                | "continue" ";"
+                | "return" [Exp] ";";*/ 
+
 MatchedStmt
   : IF '(' Exp ')' MatchedStmt ELSE MatchedStmt {    
     auto ast = new MatchedStmtAST();
@@ -328,41 +377,20 @@ MatchedStmt
     ast->matchedstmt_2 = unique_ptr<BaseAST>($7);
     $$ = ast;
   }
-  | RETURN ';' {
+  | LVal '=' Exp ';' {
     auto ast = new MatchedStmtAST();
-    ast->flag = 1;
-    $$ = ast;
-  }
-  | Exp ';' {
-    auto ast = new MatchedStmtAST();
-    ast->exp = unique_ptr<SubBaseAST>($1);
-    ast->flag = 0;
-    $$ = ast;
-  }
-  | RETURN Exp ';' {
-    auto ast = new MatchedStmtAST();
-    ast->exp = unique_ptr<SubBaseAST>($2);
-    ast->flag = 1;
-    $$ = ast;
-  }
-  | CONTINUE ';' { 
-    auto ast = new MatchedStmtAST();
-    ast->flag = 2;
-    $$ = ast;
-  }
-  | BREAK ';'{
-    auto ast = new MatchedStmtAST();
-    ast->flag = 3;
+    ast->lval = unique_ptr<LValAST>($1);
+    ast->exp = unique_ptr<SubBaseAST>($3);
     $$ = ast;
   }
   | ';'{
     auto ast = new MatchedStmtAST();
     $$ = ast;
   }
-  | LVal '=' Exp ';' {
+  | Exp ';' {
     auto ast = new MatchedStmtAST();
-    ast->lval = unique_ptr<LValAST>($1);
-    ast->exp = unique_ptr<SubBaseAST>($3);
+    ast->exp = unique_ptr<SubBaseAST>($1);
+    ast->flag = 0;
     $$ = ast;
   }
   | Block { 
@@ -376,8 +404,31 @@ MatchedStmt
     ast->stmt = unique_ptr<BaseAST>($5);
     $$ = ast;
   }
+  | BREAK ';'{
+    auto ast = new MatchedStmtAST();
+    ast->flag = 3;
+    $$ = ast;
+  }
+  | CONTINUE ';' { 
+    auto ast = new MatchedStmtAST();
+    ast->flag = 2;
+    $$ = ast;
+  }
+  | RETURN ';' {
+    auto ast = new MatchedStmtAST();
+    ast->flag = 1;
+    $$ = ast;
+  }
+  | RETURN Exp ';' {
+    auto ast = new MatchedStmtAST();
+    ast->exp = unique_ptr<SubBaseAST>($2);
+    ast->flag = 1;
+    $$ = ast;
+  }
   ;
 
+
+// OpenStmt ::= "if" "(" Exp ') Stmt | "if" "(" Exp ') MatchedStmt "else" OpenStmt 
 OpenStmt
   : IF '(' Exp ')' Stmt {    
     auto ast = new OpenStmtAST();
@@ -394,7 +445,7 @@ OpenStmt
   }
   ;
 
-
+// Exp ::= LOrExp;
 Exp
   : LOrExp {
     auto ast = new ExpAST();
@@ -403,6 +454,7 @@ Exp
   }
   ;
 
+// LOrExp ::= LAndExp | LOrExp "||" LAndExp;
 LOrExp
   : LAndExp {
     auto ast = new LOrExpAST();
@@ -417,6 +469,7 @@ LOrExp
   }
   ;
 
+// LAndExp ::= EqExp | LAndExp "&&" EqExp;
 LAndExp
   : EqExp {
     auto ast = new LAndExpAST();
@@ -431,6 +484,7 @@ LAndExp
   }
   ;
 
+// EqExp ::= RelExp | EqExp ("==" | "!=") RelExp;
 EqExp
   : RelExp {
     auto ast = new EqExpAST();
@@ -453,6 +507,7 @@ EqExp
   }
   ;
 
+// RelExp ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
 RelExp
   : AddExp {
     auto ast = new RelExpAST();
@@ -489,6 +544,7 @@ RelExp
   }
   ;
 
+// AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
 AddExp
   : MulExp {
     auto ast = new AddExpAST();
@@ -511,6 +567,7 @@ AddExp
   }
   ;
 
+// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
 MulExp
   : UnaryExp {
     auto ast = new MulExpAST();
@@ -540,6 +597,7 @@ MulExp
   }
   ;
 
+// UnaryExp ::= PrimaryExp | IDENT "(" [FuncRParams] ")" | UnaryOp UnaryExp;
 UnaryExp
   : PrimaryExp {
     auto ast = new UnaryExpAST();
@@ -567,6 +625,7 @@ UnaryExp
   }
   ;
 
+// FuncRParams ::= Exp {"," Exp};
 FuncRParam
   : Exp { 
     auto v = new vector<unique_ptr<FuncRParamAST>>();
@@ -582,8 +641,8 @@ FuncRParam
     $$ = $1;
   }
   ;
-  ;
 
+// PrimaryExp ::= "(" Exp ")" | LVal | Number;
 PrimaryExp
   : '(' Exp ')' {
     auto ast = new PrimaryExpAST();
@@ -602,6 +661,7 @@ PrimaryExp
   }
   ;
 
+// LVal ::= IDENT;
 LVal
   : IDENT {
     auto ast = new LValAST();
@@ -610,6 +670,7 @@ LVal
   }
   ;
 
+// UnaryOp ::= "+" | "-" | "!";
 UnaryOp
   : '+'{
   auto ast = new UnaryOpAST();

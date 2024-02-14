@@ -147,7 +147,7 @@ string ConstDefAST::Dump()const {
 	s.type = 0;
 	s.depth = tab_num;
 	cur_tab->table.push_back(s);
-	return "ConstDef";
+	return "ConstDefAST";
 }
 
 string ConstInitValAST::Dump()const {
