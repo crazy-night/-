@@ -1,34 +1,40 @@
 CompUnit            ::= [CompUnit] (Decl | FuncDef);
 
 Decl                     ::= ConstDecl | VarDecl;
-ConstDecl            ::= "const" BType ConstDefs
+ConstDecl            ::= "const" BType ConstDefs ";";
 BType                  ::= "int";
-Constdefs            ::= ConstDef {"," ConstDef} ";";
-ConstDef             ::= IDENT "=" ConstInitVal;
-ConstInitVal         ::= ConstExp;
-VarDecl                ::= BType VarDefs
-VarDefs           ::= VarDef {"," VarDef} ";";
-VarDef        ::= IDENT | IDENT "=" InitVal;
-InitVal       ::= Exp;
+ConstDefs            ::= ConstDef {"," ConstDef};
+ConstDef             ::= IDENT [ArraySize] "=" ConstInitVal;
+ConstInitVal         ::= ConstExp | "{" [ConstInitVals] "}";
+ConstInitVals        ::= ConstInitVal {"," ConstInitVal};
+VarDecl                ::= BType VarDefs ";";
+VarDefs                ::= VarDef {"," VarDef};
+VarDef                 ::= IDENT [{ArraySize}] "=" InitVal;
+InitVal                 ::= Exp | "{" [InitVals] "}";
+InitVals                ::= InitVal {"," InitVal};
 
 FuncDef       ::= FuncType IDENT "(" [FuncFParams] ")" Block;
 FuncType      ::= "void" | "int";
 FuncFParams   ::= FuncFParam {"," FuncFParam};
-FuncFParam    ::= BType IDENT;
+FuncFParam ::= BType IDENT ["[" "]" ArraySize];
 
-Block         ::= "{" {BlockItem} "}";
-BlockItem     ::= Decl | Stmt;
-Stmt          ::= LVal "=" Exp ";"
+ArraySize ::= "[" CosntExp "]" {"[" ConstExp "]"};
+
+Block         ::= "{" [BlockItem] "}";
+BlockItem     ::= {BlockItem} Decl | Stmt;
+Stmt ::= MatchedStmt | OpenStmt;
+MatchedStmt ::= "if" "(" Exp ")" MatchedStmt "else" MatchedStmt
+                |  LVal "=" Exp ";"
                 | [Exp] ";"
                 | Block
-                | "if" "(" Exp ")" Stmt ["else" Stmt]
                 | "while" "(" Exp ")" Stmt
                 | "break" ";"
                 | "continue" ";"
                 | "return" [Exp] ";";
+OpenStmt ::= "if" "(" Exp ') Stmt | "if" "(" Exp ') MatchedStmt "else" OpenStmt；
 
 Exp           ::= LOrExp;
-LVal          ::= IDENT;
+LVal          ::= IDENT {"[" Exp "]"};
 PrimaryExp    ::= "(" Exp ")" | LVal | Number;
 Number        ::= INT_CONST;
 UnaryExp      ::= PrimaryExp | IDENT "(" [FuncRParams] ")" | UnaryOp UnaryExp;

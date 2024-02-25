@@ -38,12 +38,16 @@ using namespace std;
   TypeAST *t_val;
   FuncFParamAST *ffp_val;
   ConstDefAST *cd_val;
+  ConstInitValAST *civ_val;
+  InitValAST *iv_val;
   VarDefAST *vd_val;
   std::vector<std::unique_ptr<BlockItemAST>> *bi_vals;
   std::vector<std::unique_ptr<ConstDefAST>> *cd_vals;
   std::vector<std::unique_ptr<VarDefAST>> *vd_vals;
+  std::vector<std::unique_ptr<SubBaseAST>> *sub_vals;
   std::vector<std::unique_ptr<FuncFParamAST>> *ffp_vals;
-  std::vector<std::unique_ptr<FuncRParamAST>> *frp_vals;
+  std::vector<std::unique_ptr<ConstInitValAST>> *civ_vals;
+  std::vector<std::unique_ptr<InitValAST>> *iv_vals;
 }
 
 // lexer 返回的所有 token 种类的声明
@@ -54,7 +58,8 @@ using namespace std;
 
 // 非终结符的类型定义
 %type <ast_val> FuncDef Block Decl ConstDecl Stmt VarDecl MatchedStmt OpenStmt CompUnit
-%type <sub_val> ConstInitVal InitVal ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
+%type <sub_val> ConstExp Exp PrimaryExp AddExp MulExp UnaryExp UnaryOp LOrExp LAndExp EqExp RelExp
+%type <sub_vals> Exps FuncRParam ArraySize
 %type <l_val> LVal
 %type <t_val> Type
 %type <int_val>Number
@@ -65,7 +70,11 @@ using namespace std;
 %type <vd_val> VarDef
 %type <ffp_vals> FuncFParams
 %type <ffp_val> FuncFParam
-%type <frp_vals> FuncRParam
+%type <civ_vals> ConstInitVals
+%type <civ_val> ConstInitVal
+%type <iv_vals> InitVals
+%type <iv_val> InitVal
+
 
 %%
 
@@ -140,6 +149,7 @@ FuncDef
   ;
 
 // FuncFParams ::= FuncFParam {"," FuncFParam};
+//{}表示0个或多个
 //此处使用move，因为vecto的push_back是深拷贝，防止注销指针;
 FuncFParams
   : FuncFParam {
@@ -155,13 +165,43 @@ FuncFParams
   }
   ;
 
-// FuncFParam ::= BType IDENT;
+// FuncFParam ::= BType IDENT ["[" "]" ArraySize];
 FuncFParam
   : Type IDENT { 
     auto ast = new FuncFParamAST();
     ast->type = unique_ptr<TypeAST>($1);
     ast->ident = *unique_ptr<string>($2);
     $$ = ast;
+  }
+  | Type IDENT '[' ']' {
+    auto ast = new FuncFParamAST();
+    ast->type = unique_ptr<TypeAST>($1);
+    ast->ident = *unique_ptr<string>($2);
+    auto v = new vector<unique_ptr<SubBaseAST>>();
+    ast->constexp = unique_ptr<vector<unique_ptr<SubBaseAST>>>(v);
+    $$ = ast;
+  }
+  | Type IDENT '[' ']' ArraySize {
+    auto ast = new FuncFParamAST();
+    ast->type = unique_ptr<TypeAST>($1);
+    ast->ident = *unique_ptr<string>($2);
+    ast->constexp = unique_ptr<vector<unique_ptr<SubBaseAST>>>($5);
+    $$ = ast;
+  }
+  ;
+
+//ArraySize ::= "[" CosntExp "]" | ArraySize "[" ConstExp "]";
+ArraySize
+  : '[' ConstExp ']' {
+    auto v = new vector<unique_ptr<SubBaseAST>>();
+    auto ast = unique_ptr<SubBaseAST>($2);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | ArraySize '[' ConstExp ']' {
+    auto ast = unique_ptr<SubBaseAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
   }
   ;
 
@@ -264,22 +304,55 @@ ConstDefs
     }
     ;
 
-// ConstDef ::= IDENT ["[" ConstExp "]"] "=" ConstInitVal;
+// ConstDef ::= IDENT [ArraySize] "=" ConstInitVal;
 ConstDef
   : IDENT '=' ConstInitVal {
     auto ast = new ConstDefAST();   
     ast->ident = *unique_ptr<string>($1);
-    ast->constinitval = unique_ptr<SubBaseAST>($3);
+    ast->constinitval = unique_ptr<ConstInitValAST>($3);
+    $$ = ast;
+  }
+  | IDENT ArraySize '=' ConstInitVal {
+    auto ast = new ConstDefAST();
+    ast->ident = *unique_ptr<string>($1);
+    ast->arraysize = unique_ptr<vector<unique_ptr<SubBaseAST>>>($2);
+    ast->constinitval = unique_ptr<ConstInitValAST>($4);
     $$ = ast;
   }
   ;
 
-// ConstInitVal ::= ConstExp;
+// ConstInitVal ::= ConstExp | "{" [ConstInitVals] "}";
 ConstInitVal
   : ConstExp {
     auto ast = new ConstInitValAST();   
     ast->constexp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
+  }
+  | '{' '}' {
+    auto v = new vector<unique_ptr<ConstInitValAST>>();
+    auto ast = new ConstInitValAST();
+    ast->array = unique_ptr<vector<unique_ptr<ConstInitValAST>>>(v);
+    $$ = ast;
+  }
+  | '{' ConstInitVals '}' {
+    auto ast = new ConstInitValAST();
+    ast->array = unique_ptr<vector<unique_ptr<ConstInitValAST>>>($2);
+    $$ = ast;
+  }
+  ;
+
+// ConstInitVals ::= ConstInitVal {"," ConstInitVal};
+ConstInitVals
+  : ConstInitVal {
+    auto v =new vector<unique_ptr<ConstInitValAST>>();
+    auto ast = unique_ptr<ConstInitValAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | ConstInitVals ',' ConstInitVal {
+    auto ast = unique_ptr<ConstInitValAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
   }
   ;
 
@@ -310,7 +383,7 @@ VarDefs
     v->push_back(move(ast));
     $$ = v;
     }
-    | VarDefs "," VarDef {
+    | VarDefs ',' VarDef {
     auto ast =unique_ptr<VarDefAST>($3);
     $1->push_back(move(ast));
     $$ = $1;
@@ -319,28 +392,66 @@ VarDefs
 
 
 
-// VarDef ::= IDENT | IDENT "=" InitVal;
+// VarDef ::= IDENT {ArraySize} | IDENT {ArraySize} "=" InitVal;
 VarDef
   : IDENT {
     auto ast = new VarDefAST();   
     ast->ident = *unique_ptr<string>($1);
     $$ = ast;
   }
-  | IDENT '=' InitVal{
+  | IDENT ArraySize {
+    auto ast = new VarDefAST();   
+    ast->ident = *unique_ptr<string>($1);
+    ast->arraysize = unique_ptr<vector<unique_ptr<SubBaseAST>>>($2);
+    $$ = ast;
+  }
+  | IDENT '=' InitVal {
     auto ast =new VarDefAST();   
     ast->ident = *unique_ptr<string>($1);
-    ast->initval = unique_ptr<SubBaseAST>($3);
+    ast->initval = unique_ptr<InitValAST>($3);
+    $$ = ast;
+  }
+  | IDENT ArraySize '=' InitVal {
+    auto ast = new VarDefAST();   
+    ast->ident = *unique_ptr<string>($1);
+    ast->arraysize = unique_ptr<vector<unique_ptr<SubBaseAST>>>($2);
+    ast->initval = unique_ptr<InitValAST>($4);
     $$ = ast;
   }
   ;
 
 
-// InitVal ::= Exp;
+// InitVal ::= Exp | "{" [InitVals] "}";
 InitVal
   : Exp {
     auto ast = new InitValAST();   
     ast->exp = unique_ptr<SubBaseAST>($1);
     $$ = ast;
+  }
+  | '{' '}' {
+    auto v = new vector<unique_ptr<InitValAST>>();
+    auto ast = new InitValAST();
+    ast->array = unique_ptr<vector<unique_ptr<InitValAST>>>(v);
+    $$ = ast;
+  }
+  | '{' InitVals '}' {
+    auto ast = new InitValAST();
+    ast->array = unique_ptr<vector<unique_ptr<InitValAST>>>($2);
+    $$ = ast;
+  }
+  ;
+// InitVals ::= InitVal {"," InitVal};
+InitVals
+  : InitVal {
+    auto v =new vector<unique_ptr<InitValAST>>();
+    auto ast = unique_ptr<InitValAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | InitVals ',' InitVal {
+    auto ast = unique_ptr<InitValAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
   }
   ;
 
@@ -363,7 +474,6 @@ Stmt
                 |  LVal "=" Exp ";"
                 | [Exp] ";"
                 | Block
-                | "if" "(" Exp ")" Stmt ["else" Stmt]
                 | "while" "(" Exp ")" Stmt
                 | "break" ";"
                 | "continue" ";"
@@ -428,7 +538,7 @@ MatchedStmt
   ;
 
 
-// OpenStmt ::= "if" "(" Exp ') Stmt | "if" "(" Exp ') MatchedStmt "else" OpenStmt 
+// OpenStmt ::= "if" "(" Exp ') Stmt | "if" "(" Exp ') MatchedStmt "else" OpenStmt; 
 OpenStmt
   : IF '(' Exp ')' Stmt {    
     auto ast = new OpenStmtAST();
@@ -442,6 +552,21 @@ OpenStmt
     ast->matchedstmt = unique_ptr<BaseAST>($5);
     ast->openstmt = unique_ptr<BaseAST>($7);
     $$ = ast;
+  }
+  ;
+
+// Exps ::= Exp | Exps "," Exp
+Exps
+  : Exp {
+    auto v = new vector<unique_ptr<SubBaseAST>>();
+    auto ast = unique_ptr<SubBaseAST>($1);
+    v->push_back(move(ast));
+    $$ = v;
+  }
+  | Exps ',' Exp {
+    auto ast = unique_ptr<SubBaseAST>($3);
+    $1->push_back(move(ast));
+    $$ = $1;
   }
   ;
 
@@ -613,31 +738,21 @@ UnaryExp
   | IDENT '(' ')' {
     auto ast = new UnaryExpAST();
     ast->ident = *unique_ptr<string>($1);
-    auto v = new vector<unique_ptr<FuncRParamAST>>();
-    ast->funcrparam = unique_ptr<vector<unique_ptr<FuncRParamAST>>>(v);
+    auto v = new vector<unique_ptr<SubBaseAST>>();
+    ast->funcrparam = unique_ptr<vector<unique_ptr<SubBaseAST>>>(v);
     $$ = ast;
   }
   | IDENT '(' FuncRParam ')' {
     auto ast = new UnaryExpAST();
     ast->ident = *unique_ptr<string>($1);
-    ast->funcrparam = unique_ptr<vector<unique_ptr<FuncRParamAST>>>($3);
+    ast->funcrparam = unique_ptr<vector<unique_ptr<SubBaseAST>>>($3);
     $$ = ast;
   }
   ;
 
-// FuncRParams ::= Exp {"," Exp};
+// FuncRParams ::= Exps;
 FuncRParam
-  : Exp { 
-    auto v = new vector<unique_ptr<FuncRParamAST>>();
-    unique_ptr<FuncRParamAST> ast(new FuncRParamAST());
-    ast->exp = unique_ptr<SubBaseAST>($1);
-    v->push_back(move(ast));
-    $$ = v;
-  }
-  | FuncRParam ',' Exp {
-    unique_ptr<FuncRParamAST> ast(new FuncRParamAST());
-    ast->exp = unique_ptr<SubBaseAST>($3);
-    $1->push_back(move(ast));
+  : Exps { 
     $$ = $1;
   }
   ;
@@ -661,12 +776,19 @@ PrimaryExp
   }
   ;
 
-// LVal ::= IDENT;
+// LVal ::= IDENT {"[" Exp "]"};
 LVal
   : IDENT {
+    auto v = new vector<unique_ptr<SubBaseAST>>();
     auto ast = new LValAST();
     ast->ident = *unique_ptr<string>($1);
+    ast->exp = unique_ptr<vector<unique_ptr<SubBaseAST>>>(v);
     $$ = ast;
+  }
+  | LVal '[' Exp ']' {
+    auto ast = unique_ptr<SubBaseAST>($3);
+    $1->exp->push_back(move(ast));
+    $$ = $1;
   }
   ;
 

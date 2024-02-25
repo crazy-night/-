@@ -7,17 +7,21 @@
 #include<cstdio>
 #include<cassert>
 #include<vector>
+#include<stack>
 #define END "end"
 
 struct Loop {
 	std::string begin;
 	std::string end;
-	Loop(int, int);
+	Loop(int);
 };
+
+std::vector<std::string> InitList(std::vector<int>& index, std::vector<int>& dim, std::string s);
 
 struct Symbol
 {
 	std::string name;
+	//0:常量,1:变量,2:int函数,3:函数参数,4:void函数,
 	int type;
 	int value;
 	int depth;
@@ -45,7 +49,7 @@ public:
 	virtual int Cal()const = 0;
 };
 
-class StartAST:public BaseAST {
+class StartAST :public BaseAST {
 public:
 	// 用智能指针管理对象
 	std::unique_ptr<BaseAST> compunit;
@@ -65,6 +69,7 @@ public:
 // ...
 class TypeAST :public BaseAST {
 public:
+	// 0:int,-1:void,
 	int type_id;
 	std::string Dump()const override;
 };
@@ -74,6 +79,7 @@ class FuncFParamAST :public BaseAST {
 public:
 	std::unique_ptr<TypeAST> type;
 	std::string ident;
+	std::unique_ptr<std::vector<std::unique_ptr<SubBaseAST>>> constexp;
 	std::string Dump() const override;
 };
 
@@ -109,26 +115,27 @@ public:
 	std::string Dump() const override;
 };
 
+class ConstInitValAST :public SubBaseAST {
+public:
+	std::unique_ptr<SubBaseAST> constexp;
+	std::unique_ptr<std::vector<std::unique_ptr<ConstInitValAST>>> array;
+	std::string Dump() const override;
+	int Cal() const override;
+};
+
 class ConstDefAST :public BaseAST {
 public:
 	std::string ident;
-	std::unique_ptr<SubBaseAST> constinitval;
+	std::unique_ptr<ConstInitValAST> constinitval;
+	std::unique_ptr<std::vector<std::unique_ptr<SubBaseAST>>> arraysize;
 	std::string Dump() const override;
 };
 
 class ConstDeclAST :public BaseAST {
 public:
 	std::unique_ptr<TypeAST> type;
-	std::unique_ptr<std::vector<std::unique_ptr<ConstDefAST>>>constdef;
+	std::unique_ptr<std::vector<std::unique_ptr<ConstDefAST>>> constdef;
 	std::string Dump() const override;
-};
-
-
-class ConstInitValAST :public SubBaseAST {
-public:
-	std::unique_ptr<SubBaseAST> constexp;
-	std::string Dump() const override;
-	int Cal() const override;
 };
 
 class ConstExpAST :public SubBaseAST {
@@ -138,30 +145,35 @@ public:
 	int Cal() const override;
 };
 
+class InitValAST :public SubBaseAST {
+public:
+	std::unique_ptr<SubBaseAST> exp;
+	std::unique_ptr<std::vector<std::unique_ptr<InitValAST>>> array;
+	std::string Dump() const override;
+	int Cal() const override;
+};
+
 class VarDefAST :public BaseAST {
 public:
 	std::string ident;
-	std::unique_ptr<SubBaseAST> initval;
+	std::unique_ptr<InitValAST> initval;
+	std::unique_ptr<std::vector<std::unique_ptr<SubBaseAST>>> arraysize;
 	std::string Dump() const override;
 };
 
 class VarDeclAST :public BaseAST {
 public:
 	std::unique_ptr<TypeAST> type;
-	std::unique_ptr<std::vector<std::unique_ptr<VarDefAST>>>vardef;
+	std::unique_ptr<std::vector<std::unique_ptr<VarDefAST>>> vardef;
 	std::string Dump() const override;
 };
 
-class InitValAST :public SubBaseAST {
-public:
-	std::unique_ptr<SubBaseAST> exp;
-	std::string Dump() const override;
-	int Cal() const override;
-};
+
 
 class LValAST :public SubBaseAST {
 public:
 	std::string ident;
+	std::unique_ptr<std::vector<std::unique_ptr<SubBaseAST>>> exp;
 	std::string Dump() const override;
 	int Cal() const override;
 	std::string Assign() const;
@@ -258,11 +270,6 @@ public:
 };
 
 
-class FuncRParamAST :public BaseAST {
-public:
-	std::unique_ptr<SubBaseAST> exp;
-	std::string Dump() const override;
-};
 
 class UnaryExpAST :public SubBaseAST {
 public:
@@ -270,7 +277,7 @@ public:
 	std::unique_ptr<SubBaseAST> unaryop;
 	std::unique_ptr<SubBaseAST> unaryexp;
 	std::string ident;
-	std::unique_ptr<std::vector<std::unique_ptr<FuncRParamAST>>> funcrparam;
+	std::unique_ptr<std::vector<std::unique_ptr<SubBaseAST>>> funcrparam;
 	std::string Dump() const override;
 	int Cal() const override;
 };

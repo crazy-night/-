@@ -47,7 +47,7 @@ int main(int argc, const char* argv[]) {
 	// dump AST
 	string s = ast->Dump();
 
-	if (strcmp(mode, "-riscv") == 0) {
+	if (strcmp(mode, "-riscv") == 0||strcmp(mode, "-perf") == 0) {
 		// 解析字符串 str, 得到 Koopa IR 程序
 		koopa_program_t program;
 		koopa_error_code_t ret = koopa_parse_from_string(s.c_str(), &program);
